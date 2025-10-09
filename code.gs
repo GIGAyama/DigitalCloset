@@ -46,12 +46,11 @@ function uploadImage(payload) {
       isNewItem = true;
       const newRowIndex = dbSheet.getLastRow() + 1;
       
-      // ★改善: 行を挿入し、各列に数式を設定
       dbSheet.insertRowAfter(newRowIndex - 1);
-      dbSheet.getRange(newRowIndex, 1).setFormula(`=MAX(A$1:A${newRowIndex - 1}) + 1`); // A列: 連番ID
-      dbSheet.getRange(newRowIndex, 2).setFormula(`=IFERROR(XLOOKUP(D${newRowIndex},'種類番号'!B:B,'種類番号'!A:A,""), "")`); // B列: 種類番号
-      dbSheet.getRange(newRowIndex, 3).setFormula(`=IFERROR(XLOOKUP(E${newRowIndex},'色番号'!B:B,'色番号'!A:A,""), "")`); // C列: 色番号
-      dbSheet.getRange(newRowIndex, 12).setFormula(`=IF(ISBLANK(J${newRowIndex}), IF(ISBLANK(I${newRowIndex}), "", YEAR(TODAY())-I${newRowIndex}), J${newRowIndex}-I${newRowIndex})`); // L列: 着用年数
+      dbSheet.getRange(newRowIndex, 1).setFormula(`=MAX(A$1:A${newRowIndex - 1}) + 1`);
+      dbSheet.getRange(newRowIndex, 2).setFormula(`=IFERROR(XLOOKUP(D${newRowIndex},'種類番号'!B:B,'種類番号'!A:A,""), "")`);
+      dbSheet.getRange(newRowIndex, 3).setFormula(`=IFERROR(XLOOKUP(E${newRowIndex},'色番号'!B:B,'色番号'!A:A,""), "")`);
+      dbSheet.getRange(newRowIndex, 12).setFormula(`=IF(ISBLANK(J${newRowIndex}), IF(ISBLANK(I${newRowIndex}), "", YEAR(TODAY())-I${newRowIndex}), J${newRowIndex}-I${newRowIndex})`);
 
       SpreadsheetApp.flush(); 
       targetItemId = dbSheet.getRange(newRowIndex, 1).getDisplayValue();
@@ -62,7 +61,6 @@ function uploadImage(payload) {
       }
     }
     
-    // 画像データがある場合のみアップロード処理を実行
     if (fileData && FOLDER_ID) {
       const folder = DriveApp.getFolderById(FOLDER_ID);
       const contentType = fileData.substring(5, fileData.indexOf(';'));
@@ -86,10 +84,8 @@ function uploadImage(payload) {
       }
       return result;
     } else if (isNewItem) {
-      // 画像データがない新規登録の場合
       return { newItemId: targetItemId, fileId: '' };
     } else {
-      // 画像データがない更新の場合
       return { fileId: '' };
     }
 
@@ -174,29 +170,93 @@ function getDashboardData() {
   }
 }
 
-function getItemDetails(itemId) {
+/**
+ * ★新機能：ご無沙汰アイテムを取得
+ * @param {string} type 'last_worn' (最後に着てから最も日数が経っている順) または 'wear_count' (着用回数が少ない順)
+ * @returns {Array} ご無沙汰アイテムのトップ5
+ */
+function getNeglectedItems(type) {
   try {
-    if (!itemId) {
-      throw new Error('アイテムIDが指定されていません。');
+    const items = getItems();
+    if (items.error) throw new Error(items.error);
+    
+    const wearLogLastRow = wearLogSheet.getLastRow();
+    if (wearLogLastRow < 2) return [];
+
+    const wearLog = wearLogSheet.getRange(2, 2, wearLogLastRow - 1, 2).getValues();
+    
+    const wearStats = {};
+    items.forEach(item => {
+      wearStats[item.ID] = {
+        item: item,
+        wearCount: 0,
+        lastWorn: new Date(0) // 1970-01-01
+      };
+    });
+
+    wearLog.forEach(([itemId, date]) => {
+      if (wearStats[itemId]) {
+        wearStats[itemId].wearCount++;
+        const wearDate = new Date(date);
+        if (wearDate > wearStats[itemId].lastWorn) {
+          wearStats[itemId].lastWorn = wearDate;
+        }
+      }
+    });
+
+    let sortedItems = Object.values(wearStats);
+
+    if (type === 'last_worn') {
+      sortedItems.sort((a, b) => a.lastWorn - b.lastWorn);
+    } else { // 'wear_count'
+      sortedItems.sort((a, b) => {
+        if (a.wearCount !== b.wearCount) {
+          return a.wearCount - b.wearCount;
+        }
+        return a.lastWorn - b.lastWorn; // 回数が同じ場合は古い順
+      });
     }
 
+    return sortedItems.slice(0, 5).map(stat => ({
+      item: stat.item,
+      wearCount: stat.wearCount,
+      lastWorn: stat.lastWorn > new Date(0) ? Utilities.formatDate(stat.lastWorn, Session.getScriptTimeZone(), 'yyyy/MM/dd') : '着用記録なし'
+    }));
+
+  } catch(e) {
+    console.error('getNeglectedItems Error: ' + e.stack);
+    return { error: 'ご無沙汰アイテムの取得中にエラーが発生しました: ' + e.message };
+  }
+}
+
+function getItemDetails(itemId) {
+  try {
+    if (!itemId) throw new Error('アイテムIDが指定されていません。');
     const allItems = getItems();
     if (allItems.error) throw new Error(allItems.error);
-    
     const itemsById = allItems.reduce((map, item) => { map[item.ID] = item; return map; }, {});
-    
     const targetItem = itemsById[itemId];
-    if (!targetItem) {
-      throw new Error('アイテムが見つかりません。');
-    }
+    if (!targetItem) throw new Error('アイテムが見つかりません。');
     
     const allCoordinates = _getCoordinates(itemsById);
-    
     const relatedCoordinates = allCoordinates
       .filter(coord => coord.itemIds.includes(String(itemId)))
       .sort((a, b) => b.rating - a.rating);
+    
+    // ★新機能：着用統計とコストパフォーマンスを追加
+    const wearStats = _getItemWearStats(itemId);
+    const price = parseFloat(String(targetItem['価格']).replace(/[^0-9.-]+/g, '')) || 0;
+    let costPerWear = 0;
+    if (price > 0 && wearStats.total > 0) {
+      costPerWear = Math.round(price / wearStats.total);
+    }
 
-    return { item: targetItem, coordinates: relatedCoordinates };
+    return { 
+      item: targetItem, 
+      coordinates: relatedCoordinates,
+      wearStats: wearStats,
+      costPerWear: costPerWear
+    };
 
   } catch (e) {
     console.error('getItemDetails Error: ' + e.stack);
@@ -452,14 +512,8 @@ ${userQuestion}`;
 function saveItem(itemData) {
   try {
     const headers = dbSheet.getRange(1, 1, 1, dbSheet.getLastColumn()).getValues()[0];
-    // ★改善: 数式を入力する列をスクリプトによる上書きから保護
     const formulaColumns = ['ID', '種類番号', '色番号', '着用年数'];
     
-    const dataToWrite = { ...itemData };
-    // ★改善: 種類名・色名を、それぞれの番号からマスターシートを参照して取得
-    dataToWrite['種類'] = masterIdToName(itemData['種類番号'], categoryMasterSheet);
-    dataToWrite['色'] = masterIdToName(itemData['色番号'], colorMasterSheet);
-
     let targetRow;
     let message;
 
@@ -469,39 +523,23 @@ function saveItem(itemData) {
       targetRow = range.getRow();
       message = 'アイテムを更新しました。';
     } else {
-      // このフローは画像なしで新規登録する場合のフォールバック
-      const tempResult = uploadImage({}); // 新規行の準備とID採番を依頼
+      const tempResult = uploadImage({});
       if (tempResult.error) throw new Error(tempResult.error);
-      targetRow = dbSheet.getLastRow(); // uploadImageが最終行に追加したと仮定
+      targetRow = dbSheet.getLastRow();
       itemData.id = tempResult.newItemId;
       message = '新しいアイテムを登録しました。';
     }
 
     headers.forEach((header, i) => {
-      // formulaColumnsに含まれる列はスキップ
-      if (formulaColumns.includes(header)) {
-        return;
-      }
-      const value = dataToWrite[header];
-      if (value !== undefined && value !== null) {
-        // ★重要: フロントから送られてきた種類番号と色番号は書き込まず、代わりに種類名・色名を書き込む
-        // これにより、シート側のXLOOKUP関数が正しく動作する
-        if (header === '種類' || header === '色') {
-           dbSheet.getRange(targetRow, i + 1).setValue(dataToWrite[header]);
-        } else {
-           dbSheet.getRange(targetRow, i + 1).setValue(value);
-        }
-      }
-    });
-
-    // 種類・色以外のデータを書き込む
-    headers.forEach((header, i) => {
-      if (formulaColumns.includes(header) || header === '種類' || header === '色') {
-        return;
-      }
+      if (formulaColumns.includes(header)) return;
+      
       const value = itemData[header];
-      if (value !== undefined && value !== null) {
-        dbSheet.getRange(targetRow, i + 1).setValue(value);
+      // 種類名・色名は itemData から直接渡さず、スプレッドシートの XLOOKUP で導出させる
+      const isMasterDataField = header === '種類' || header === '色';
+      const valueToSet = isMasterDataField ? itemData[header] : value;
+      
+      if (valueToSet !== undefined && valueToSet !== null) {
+        dbSheet.getRange(targetRow, i + 1).setValue(valueToSet);
       }
     });
     
@@ -556,7 +594,6 @@ function restoreItem(id) {
 function logWear(itemId) {
   try {
     if (!itemId) { throw new Error('アイテムIDが指定されていません。'); }
-    // ★改善: A列に連番の数式を設定
     const newRowIndex = wearLogSheet.getLastRow() + 1;
     wearLogSheet.getRange(newRowIndex, 1).setFormula(`=MAX(A$1:A${newRowIndex - 1}) + 1`);
     wearLogSheet.getRange(newRowIndex, 2, 1, 2).setValues([[itemId, new Date()]]);
@@ -579,7 +616,6 @@ function saveCoordinate(payload) {
       if (!range) { throw new Error('指定されたIDのコーデが見つかりません。'); }
       
       coordLogSheet.getRange(range.getRow(), 2).setValue(sortedIds);
-      // 評価と理由も更新できるようにする
       if (rating !== undefined) coordLogSheet.getRange(range.getRow(), 3).setValue(rating);
       if (reason !== undefined) coordLogSheet.getRange(range.getRow(), 5).setValue(reason);
       return { status: 'success', message: 'コーディネートを更新しました！' };
@@ -597,7 +633,6 @@ function saveCoordinate(payload) {
         }
     }
     
-    // ★改善: A列に連番の数式を設定
     const newRowIndex = lastRow + 1;
     coordLogSheet.getRange(newRowIndex, 1).setFormula(`=MAX(A$1:A${newRowIndex - 1}) + 1`);
     
@@ -648,8 +683,6 @@ function logCoordinateWear(itemIds) {
     const timestamp = new Date();
     const rowsToAdd = itemIds.map(itemId => {
       const newRowIndex = wearLogSheet.getLastRow() + 1;
-      // ★改善: 各行のA列に連番の数式を設定
-      // ただし、複数行同時挿入ではMAX関数が正しく機能しないため、1行ずつ挿入する
       wearLogSheet.appendRow(['', itemId, timestamp]);
       const lastRow = wearLogSheet.getLastRow();
       wearLogSheet.getRange(lastRow, 1).setFormula(`=MAX(A$1:A${lastRow - 1}) + 1`);
@@ -665,14 +698,36 @@ function logCoordinateWear(itemIds) {
 // ヘルパー関数
 //----------------------------------------------------------------
 
-function masterIdToName(id, sheet) {
-  if (!id) return '';
-  const lastRow = sheet.getLastRow();
-  if (lastRow < 2) return '';
-  const data = sheet.getRange(2, 1, lastRow - 1, 2).getDisplayValues();
-  const match = data.find(row => row[0] == id);
-  return match ? match[1] : '';
+/**
+ * ★新機能: 着用統計を取得するヘルパー関数
+ * @param {string} itemId 対象のアイテムID
+ * @returns {object} { total: number, byYear: object, history: array }
+ */
+function _getItemWearStats(itemId) {
+  const wearLogLastRow = wearLogSheet.getLastRow();
+  if (wearLogLastRow < 2) return { total: 0, byYear: {}, history: [] };
+
+  const allWearLogs = wearLogSheet.getRange(2, 2, wearLogLastRow - 1, 2).getValues();
+  const itemLogs = allWearLogs
+    .filter(([id, date]) => id == itemId && date)
+    .map(([id, date]) => new Date(date));
+
+  if (itemLogs.length === 0) return { total: 0, byYear: {}, history: [] };
+  
+  const byYear = {};
+  itemLogs.forEach(date => {
+    const year = date.getFullYear();
+    byYear[year] = (byYear[year] || 0) + 1;
+  });
+
+  const history = itemLogs
+    .sort((a, b) => b - a) // 新しい順にソート
+    .slice(0, 5)
+    .map(date => Utilities.formatDate(date, Session.getScriptTimeZone(), 'yyyy/MM/dd'));
+
+  return { total: itemLogs.length, byYear, history };
 }
+
 
 function _calculateStats(items) {
   let totalCost = 0;
