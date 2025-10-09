@@ -22,13 +22,13 @@
 
   <div class="main-container">
     <header class="header">
-      <h1>Digital Closet</h1>
+      <h1><i class="fas fa-tshirt mr-2"></i>Digital Closet</h1>
       <div class="header-actions">
-        <button class="btn btn-warning" onclick="openAiConsultModal()">AIに相談する</button>
-        <button class="btn btn-danger" onclick="openStyleModal()">AIスタイリスト</button>
-        <button class="btn btn-info" onclick="openCoordModal()">コーデ作成</button>
+        <button class="btn btn-warning" onclick="openAiConsultModal()"><i class="fas fa-comments mr-1"></i> AIに相談</button>
+        <button class="btn btn-danger" onclick="openStyleModal()"><i class="fas fa-magic mr-1"></i> AIスタイリスト</button>
+        <button class="btn btn-info" onclick="openCoordModal()"><i class="fas fa-layer-group mr-1"></i> コーデ作成</button>
         <div class="btn-group">
-          <button class="btn btn-primary" onclick="openItemModal()">＋ 新規アイテム登録</button>
+          <button class="btn btn-primary" onclick="openItemModal()"><i class="fas fa-plus mr-1"></i> 新規アイテム</button>
           <button class="btn btn-primary dropdown-toggle dropdown-toggle-split" data-toggle="dropdown"></button>
           <div class="dropdown-menu dropdown-menu-right">
             <a class="dropdown-item" href="#" onclick="openAiRegisterModal(event)">AIで下書きを作成</a>
@@ -38,25 +38,27 @@
     </header>
 
     <ul class="nav nav-tabs" id="myTab" role="tablist">
-      <li class="nav-item"><a class="nav-link active" id="closet-tab" data-toggle="tab" href="#closet" role="tab">Closet</a></li>
-      <li class="nav-item"><a class="nav-link" id="disposed-tab" data-toggle="tab" href="#disposed" role="tab">廃棄済み</a></li>
-      <li class="nav-item"><a class="nav-link" id="dashboard-tab" data-toggle="tab" href="#dashboard" role="tab">Dashboard</a></li>
+      <li class="nav-item"><a class="nav-link active" id="closet-tab" data-toggle="tab" href="#closet" role="tab"><i class="fas fa-door-open mr-1 d-none d-sm-inline"></i>Closet</a></li>
+      <li class="nav-item"><a class="nav-link" id="dashboard-tab" data-toggle="tab" href="#dashboard" role="tab"><i class="fas fa-chart-pie mr-1 d-none d-sm-inline"></i>Dashboard</a></li>
+      <li class="nav-item"><a class="nav-link" id="calendar-tab" data-toggle="tab" href="#calendar" role="tab"><i class="fas fa-calendar-alt mr-1 d-none d-sm-inline"></i>Calendar</a></li>
+      <li class="nav-item"><a class="nav-link" id="disposed-tab" data-toggle="tab" href="#disposed" role="tab"><i class="fas fa-trash-alt mr-1 d-none d-sm-inline"></i>廃棄済み</a></li>
     </ul>
 
     <div class="tab-content" id="myTabContent">
+      <!-- Closet Tab -->
       <div class="tab-pane fade show active" id="closet" role="tabpanel">
         <div class="controls mt-4 mb-4">
           <div class="form-row align-items-center">
             <div class="form-group col-12"><input type="text" id="searchInput" class="form-control" placeholder="キーワード検索..."></div>
-            <div class="form-group col-6"><select id="categoryFilter" class="form-control"></select></div>
-            <div class="form-group col-6"><select id="colorFilter" class="form-control"></select></div>
-            <div class="form-group col-6"><select id="seasonFilter" class="form-control"><option value="">シーズン</option><option value="春">春</option><option value="夏">夏</option><option value="秋">秋</option><option value="冬">冬</option></select></div>
-            <div class="form-group col-6"><select id="sortOrder" class="form-control"></select></div>
+            <div class="form-group col-md-3 col-6"><select id="categoryFilter" class="form-control"></select></div>
+            <div class="form-group col-md-3 col-6"><select id="colorFilter" class="form-control"></select></div>
+            <div class="form-group col-md-3 col-6"><select id="seasonFilter" class="form-control"><option value="">シーズン</option><option value="春">春</option><option value="夏">夏</option><option value="秋">秋</option><option value="冬">冬</option></select></div>
+            <div class="form-group col-md-3 col-6"><select id="sortOrder" class="form-control"></select></div>
           </div>
            <div class="d-flex justify-content-between align-items-center mt-3 px-2">
                <div class="btn-group btn-group-toggle" data-toggle="buttons">
-                   <label class="btn btn-outline-secondary active"><input type="radio" name="view" id="cardView" autocomplete="off" checked> カード</label>
-                   <label class="btn btn-outline-secondary"><input type="radio" name="view" id="listView" autocomplete="off"> リスト</label>
+                   <label class="btn btn-outline-secondary active"><input type="radio" name="view" id="cardView" autocomplete="off" checked> <i class="fas fa-th-large"></i></label>
+                   <label class="btn btn-outline-secondary"><input type="radio" name="view" id="listView" autocomplete="off"> <i class="fas fa-bars"></i></label>
                </div>
                 <div class="text-secondary"><span id="itemCount">0</span> 件</div>
            </div>
@@ -64,27 +66,49 @@
         <div id="itemsGrid" class="row"></div>
       </div>
       
-      <div class="tab-pane fade" id="disposed" role="tabpanel">
-        <div class="mt-4 table-responsive-sm">
-          <div id="disposedItemsGrid"></div>
-        </div>
-      </div>
-      
+      <!-- Dashboard Tab -->
       <div class="tab-pane fade" id="dashboard" role="tabpanel">
         <div class="dashboard-grid mt-4">
             <div class="chart-container" id="statsSummary" style="grid-column: 1 / -1;"></div>
-            <div class="chart-container"><h5>着用回数 Top 10</h5><ul id="wearRank" class="rank-list"></ul></div>
-            <div class="chart-container"><h5>ブランド別 投資額 Top 10</h5><ul id="brandRank" class="rank-list"></ul></div>
+            <div class="chart-container"><h5><i class="fas fa-trophy mr-2 text-warning"></i>着用回数 Top 10</h5><ul id="wearRank" class="rank-list"></ul></div>
+            <div class="chart-container">
+                <h5><i class="fas fa-ghost mr-2 text-info"></i>ご無沙汰アイテム Top 5</h5>
+                <select id="unwornSortOrder" class="form-control form-control-sm mb-2">
+                    <option value="last_wear_asc">最後に着てから最も日数が経っている順</option>
+                    <option value="wear_count_asc">着用回数が少ない順</option>
+                </select>
+                <ul id="unwornRank" class="rank-list"></ul>
+            </div>
+            <div class="chart-container"><h5><i class="fas fa-tags mr-2 text-success"></i>ブランド別 投資額 Top 10</h5><ul id="brandRank" class="rank-list"></ul></div>
             <div class="chart-container"> <canvas id="categoryChart"></canvas> </div>
             <div class="chart-container"> <canvas id="colorChart"></canvas> </div>
             <div class="chart-container" style="grid-column: 1 / -1;"> <canvas id="yearlyInvestmentChart"></canvas> </div>
             <div class="chart-container" style="grid-column: 1 / -1;">
               <div class="d-flex flex-column flex-sm-row justify-content-between align-items-sm-center mb-2">
-                  <h5 class="mb-2 mb-sm-0">保存したコーデ</h5>
+                  <h5 class="mb-2 mb-sm-0"><i class="fas fa-images mr-2 text-primary"></i>保存したコーデ</h5>
                   <select id="coordFilterItem" class="form-control" style="width: auto; max-width: 250px;"></select>
               </div>
               <div id="saved-coords" class="rank-list"></div>
             </div>
+        </div>
+      </div>
+
+      <!-- Calendar Tab -->
+      <div class="tab-pane fade" id="calendar" role="tabpanel">
+          <div id="calendar-container" class="mt-4">
+              <div id="calendar-header">
+                  <button id="prev-month-btn" class="btn btn-outline-secondary">&lt;</button>
+                  <h3 id="month-year-display"></h3>
+                  <button id="next-month-btn" class="btn btn-outline-secondary">&gt;</button>
+              </div>
+              <div id="calendar-grid"></div>
+          </div>
+      </div>
+
+      <!-- Disposed Tab -->
+      <div class="tab-pane fade" id="disposed" role="tabpanel">
+        <div class="mt-4 table-responsive-sm">
+          <div id="disposedItemsGrid"></div>
         </div>
       </div>
     </div>
@@ -126,7 +150,7 @@
       <div class="form-group"><label>メモ:</label><textarea id="itemMemo" class="form-control" rows="3"></textarea></div>
     </div>
     <div class="modal-footer justify-content-between">
-      <button type="button" id="aiUpdateBtn" class="btn btn-outline-danger" onclick="initiateAiUpdate()">AIで画像から更新</button>
+      <button type="button" id="aiUpdateBtn" class="btn btn-outline-danger" onclick="initiateAiUpdate()"><i class="fas fa-robot mr-1"></i> AIで画像から更新</button>
       <div>
         <button type="button" class="btn btn-secondary" data-dismiss="modal">閉じる</button>
         <button type="button" id="saveItemBtn" class="btn btn-primary" onclick="saveItem()">保存する</button>
@@ -201,6 +225,12 @@
     <div class="modal-header"><h5 class="modal-title">アイテム詳細</h5><button type="button" class="close" data-dismiss="modal"><span>&times;</span></button></div>
     <div class="modal-body" id="itemDetailContent">
     </div>
+  </div></div></div>
+
+  <div class="modal fade" id="calendarDayModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered modal-lg"><div class="modal-content">
+      <div class="modal-header"><h5 class="modal-title" id="calendarDayModalTitle"></h5><button type="button" class="close" data-dismiss="modal"><span>&times;</span></button></div>
+      <div class="modal-body" id="calendarDayModalBody"></div>
+      <div class="modal-footer"><button type="button" class="btn btn-secondary" data-dismiss="modal">閉じる</button><button type="button" class="btn btn-info" id="saveCoordFromCalendarBtn">このコーデを保存</button></div>
   </div></div></div>
 
   <!-- External Scripts -->
