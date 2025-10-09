@@ -50,14 +50,11 @@
     $('a[data-toggle="tab"][href="#dashboard"]').on('shown.bs.tab', setupDashboard);
     $('a[data-toggle="tab"][href="#disposed"]').on('shown.bs.tab', loadDisposedItems);
     
-    // AI登録モーダル
     document.getElementById('itemImageInput').addEventListener('change', handleImageSelection);
     
-    // アイテム登録モーダル内の画像アップロード用イベント
     document.getElementById('imageUploadBtn').addEventListener('click', () => document.getElementById('imageUploadInput').click());
     document.getElementById('imageUploadInput').addEventListener('change', handleImageUpload);
 
-    // AI相談室モーダル
     document.getElementById('aiConsultImageInput').addEventListener('change', handleConsultImageSelection);
     document.getElementById('coordFilterItem').addEventListener('change', () => {
       if (dashboardDataCache) renderSavedCoords(dashboardDataCache.coordinates);
@@ -68,6 +65,9 @@
         handleAiConsultSend();
       }
     });
+
+    // ★新機能: ご無沙汰アイテムのソート順変更イベント
+    document.getElementById('neglectedSortOrder').addEventListener('change', loadNeglectedItems);
 
     setupEventDelegation();
   }
@@ -209,14 +209,14 @@
 
   function createItemCard(item) {
     const imageUrl = getImageUrl(item, 400);
-    return `<div class="col-12 col-sm-6 col-md-4 col-lg-3 mb-4">
+    return `<div class="col-6 col-md-4 col-lg-3 mb-4">
               <div class="item-card">
                 <img loading="lazy" src="${imageUrl}" alt="${item['名前']}" onerror="this.src='${getImageUrl(null, 400)}'" onclick="openItemDetailModal('${item.ID}')">
                 <div class="item-card-body">
                   <h5>${item['名前'] || "名称未設定"}</h5>
                   <p>${item['ブランド'] || "ブランド未設定"}</p>
-                  <p>${item['種類']} / ${item['色']}</p>
-                  <p>¥${item['価格'].toLocaleString()}</p>
+                  <p class="d-none d-md-block">${item['種類']} / ${item['色']}</p>
+                  <p class="d-none d-md-block">¥${item['価格'].toLocaleString()}</p>
                 </div>
                 <div>
                   <button class="btn btn-sm btn-block btn-success mb-2" onclick="handleLogWear('${item.ID}')">今日着た！</button>
@@ -397,11 +397,17 @@
     btn.textContent = '保存中...';
     
     try {
+      const categorySelect = document.getElementById('itemCategory');
+      const colorSelect = document.getElementById('itemColor');
+
       const itemData = {
           id: document.getElementById('itemId').value,
-          '名前': document.getElementById('itemName').value, '種類番号': document.getElementById('itemCategory').value,
-          '色番号': document.getElementById('itemColor').value, 'ブランド': document.getElementById('itemBrand').value,
-          '価格': document.getElementById('itemPrice').value, '購入年': document.getElementById('itemPurchaseYear').value,
+          '名前': document.getElementById('itemName').value,
+          '種類': categorySelect.options[categorySelect.selectedIndex].text,
+          '色': colorSelect.options[colorSelect.selectedIndex].text,
+          'ブランド': document.getElementById('itemBrand').value,
+          '価格': document.getElementById('itemPrice').value,
+          '購入年': document.getElementById('itemPurchaseYear').value,
           '画像URL': document.getElementById('itemImageUrl').value,
           '着用シーズン': Array.from(document.querySelectorAll('#seasonCheckboxes input:checked')).map(el => el.value).join(','),
           'フォーマル度': document.getElementById('formality').value, '素材': document.getElementById('itemMaterial').value,
@@ -811,13 +817,14 @@
   }
   
   //----------------------------------------------------------------
-  // ダッシュボード
+  // ダッシュボード & 詳細画面
   //----------------------------------------------------------------
   async function setupDashboard() {
       showLoading(true);
       try {
           const data = await callServerFunction('getDashboardData');
           renderDashboard(data);
+          loadNeglectedItems(); // ★新機能: ご無沙汰アイテムを初期表示
       } catch(error) {
           onFailure(error);
       } finally {
@@ -866,14 +873,17 @@
     }
   }
 
+  // ★新機能: アイテム詳細画面のHTMLを生成
   function buildItemDetailHtml(data) {
-    const { item, coordinates } = data;
+    const { item, coordinates, wearStats, costPerWear } = data;
     const imageUrl = getImageUrl(item, 400);
 
     const headerHtml = `
-      <div id="itemDetailHeader">
-        <img loading="lazy" src="${imageUrl}" alt="${item['名前']}" onerror="this.src='${getImageUrl(null, 400)}'">
-        <div>
+      <div class="item-detail-grid">
+        <div class="item-detail-img-container">
+          <img loading="lazy" src="${imageUrl}" alt="${item['名前']}" onerror="this.src='${getImageUrl(null, 400)}'">
+        </div>
+        <div class="item-detail-info-container">
           <h3>${item['名前']}</h3>
           <dl id="itemDetailInfo">
             <dt>ブランド</dt><dd>${item['ブランド'] || '-'}</dd>
@@ -882,14 +892,45 @@
             <dt>価格</dt><dd>¥${(item['価格'] || 0).toLocaleString()}</dd>
             <dt>購入年</dt><dd>${item['購入年'] || '-'}</dd>
             <dt>シーズン</dt><dd>${item['着用シーズン'] || '-'}</dd>
+            <dt>フォーマル度</dt><dd>${item['フォーマル度'] || '-'}</dd>
+            <dt>メモ</dt><dd>${item['メモ'] || '-'}</dd>
           </dl>
+        </div>
+        <div class="item-detail-stats-container">
+          <div class="stat-box">
+            <div class="stat-value">${wearStats.total} <small>回</small></div>
+            <div class="stat-label">総着用回数</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-value">¥${costPerWear > 0 ? costPerWear.toLocaleString() : '-'}</div>
+            <div class="stat-label">コストパフォーマンス</div>
+          </div>
+        </div>
+        <div class="item-detail-wear-history">
+          <h5>着用履歴</h5>
+          <div class="wear-history-grid">
+            <div>
+              <h6>年度別</h6>
+              ${Object.keys(wearStats.byYear).length > 0
+                ? `<ul class="wear-history-list">${Object.entries(wearStats.byYear).sort((a,b) => b[0] - a[0]).map(([year, count]) => `<li>${year}年: <strong>${count}</strong>回</li>`).join('')}</ul>`
+                : '<p class="text-muted small">記録なし</p>'
+              }
+            </div>
+            <div>
+              <h6>最近の着用</h6>
+              ${wearStats.history.length > 0
+                ? `<ul class="wear-history-list">${wearStats.history.map(date => `<li>${date}</li>`).join('')}</ul>`
+                : '<p class="text-muted small">記録なし</p>'
+              }
+            </div>
+          </div>
         </div>
       </div>
     `;
 
     const coordsHtml = `
       <div id="itemDetailCoords">
-        <h5>このアイテムを使ったコーデ</h5>
+        <h5 class="mt-4">このアイテムを使ったコーデ</h5>
         <ul class="rank-list">
           ${coordinates.length > 0 ? coordinates.map(coord => renderCoordItem(coord, item.ID)).join('') : '<li class="text-muted">関連するコーデはありません。</li>'}
         </ul>
@@ -1024,6 +1065,41 @@
       }).join("");
   }
 
+  // ★新機能: ご無沙汰アイテムリストの描画
+  async function loadNeglectedItems() {
+    const sortType = document.getElementById('neglectedSortOrder').value;
+    const list = document.getElementById('neglectedItemsList');
+    list.innerHTML = '<li><div class="spinner-border spinner-border-sm" role="status"></div> 読み込み中...</li>';
+
+    try {
+      const data = await callServerFunction('getNeglectedItems', sortType);
+      renderNeglectedItems(data);
+    } catch(error) {
+      onFailure(error);
+      list.innerHTML = '<li>エラーが発生しました。</li>';
+    }
+  }
+
+  function renderNeglectedItems(data) {
+      const list = document.getElementById('neglectedItemsList');
+      if (!data || data.length === 0) {
+          list.innerHTML = "<li>対象アイテムはありません。</li>";
+          return;
+      }
+      list.innerHTML = data.map(d => {
+          const imgUrl = getImageUrl(d.item, 100);
+          return `<li class="rank-item">
+                      <img loading="lazy" src="${imgUrl}" alt="${d.item['名前']}" onclick="openItemDetailModal('${d.item.ID}')" style="cursor: pointer;">
+                      <div class="rank-item-info">
+                        <div class="name">${d.item['名前']}</div>
+                        <div class="brand">着用: ${d.wearCount}回</div>
+                      </div>
+                      <div class="count small">${d.lastWorn}</div>
+                    </li>`;
+      }).join("");
+  }
+
+
   function renderBrandRank(data) {
       const list = document.getElementById('brandRank');
       const sortedBrands = Object.entries(data).sort(([, a], [, b]) => b.amount - a.amount).slice(0, 10);
@@ -1084,7 +1160,7 @@
   }
 
   async function handleDeleteCoordinate(coordId) {
-    const isConfirmed = await showConfirmationDialog({ // ★改善: ヘルパー関数を使用
+    const isConfirmed = await showConfirmationDialog({
         text: "このコーデを削除しますか？",
         confirmButtonText: 'はい、削除します'
     });
@@ -1103,7 +1179,7 @@
   }
 
   async function handleLogCoordinateWear(itemIds) {
-    const isConfirmed = await showConfirmationDialog({ // ★改善: ヘルパー関数を使用
+    const isConfirmed = await showConfirmationDialog({
       text: `${itemIds.length}点のアイテムをまとめて着用記録しますか？`,
       icon: 'question',
       confirmButtonColor: '#28a745',
@@ -1214,7 +1290,6 @@
       reader.readAsDataURL(file);
   });
 
-  // ★改善: 画像URL生成を共通化
   function getImageUrl(item, size = 400) {
     if (item && item['画像URL']) {
       return `${G_DRIVE_THUMBNAIL_URL_PREFIX}${item['画像URL']}&sz=w${size}`;
@@ -1222,13 +1297,12 @@
     return `https://placehold.co/${size}x${size}/eee/ccc?text=No+Image`;
   }
 
-  // ★改善: 確認ダイアログ表示を共通化
   async function showConfirmationDialog(config) {
     const defaultConfig = {
       title: '確認',
       icon: 'warning',
       showCancelButton: true,
-      confirmButtonColor: 'var(--color-accent-danger)',
+      confirmButtonColor: '#c9443a',
       cancelButtonColor: '#6c757d',
       cancelButtonText: 'キャンセル'
     };
