@@ -1,11 +1,13 @@
+//★★初回設定★★
+//⚙️「プロジェクトの設定」から、スクリプトプロパティ-の設定を行う。画像を保存するフォルダIDを「DRIVE_FOLDER_ID」、Gemini APIキーを「GEMINI_API_KEY」
 /**
- * @fileoverview Digital Closet アプリケーションのサーバーサイドロジック。
- * データ連携、ビジネスロジック、Gemini APIとの通信を管理します。
- * 全体的にパフォーマンスと堅牢性を向上させるリファクタリングを実施。
+ * @fileoverview Digital Closet アプリケーションのサーバーサイドロジックを担当します。
+ * Google Apps Scriptで記述されており、スプレッドシートとのデータ連携、
+ * ビジネスロジックの実行、およびGemini APIとの通信を管理します。
  */
 
 //----------------------------------------------------------------
-// グローバル定数・初期設定
+// グローバル定数
 //----------------------------------------------------------------
 const ss = SpreadsheetApp.getActiveSpreadsheet();
 const dbSheet = ss.getSheetByName('データベース');
@@ -13,19 +15,8 @@ const categoryMasterSheet = ss.getSheetByName('種類番号');
 const colorMasterSheet = ss.getSheetByName('色番号');
 const wearLogSheet = ss.getSheetByName('着用ログ');
 const coordLogSheet = ss.getSheetByName('コーディネートログ');
-
-const SCRIPT_PROPERTIES = PropertiesService.getScriptProperties();
-const FOLDER_ID = SCRIPT_PROPERTIES.getProperty('DRIVE_FOLDER_ID');
-const GEMINI_API_KEY = SCRIPT_PROPERTIES.getProperty('GEMINI_API_KEY');
-
-/**
- * 起動時に設定値の存在を確認します。
- * @throws {Error} 必須のスクリプトプロパティが設定されていない場合にエラーをスローします。
- */
-function checkConfiguration() {
-  if (!FOLDER_ID) throw new Error('スクリプトプロパティ「DRIVE_FOLDER_ID」が設定されていません。');
-  if (!GEMINI_API_KEY) throw new Error('スクリプトプロパティ「GEMINI_API_KEY」が設定されていません。');
-}
+const FOLDER_ID = PropertiesService.getScriptProperties().getProperty('DRIVE_FOLDER_ID');
+const API_KEY = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
 
 //----------------------------------------------------------------
 // Webアプリケーションのエントリーポイント
@@ -39,48 +30,115 @@ function include(filename) {
 }
 
 //----------------------------------------------------------------
-// データ取得 (Read) - パフォーマンス向上のため初期データは一括取得
+// 画像アップロード & 新規行準備
 //----------------------------------------------------------------
-/**
- * アプリ初期化時に必要なすべてのデータを一括で取得します。
- * @returns {object} アプリケーションの初期状態に必要なデータ。
- */
-function getInitialData() {
+function uploadImage(payload = {}) {
+  const { fileData, fileName, itemId } = payload;
   try {
-    const allItems = _getAllItemsFromSheet();
-    return {
-      items: allItems.filter(item => !item['廃棄年']),
-      disposedItems: allItems.filter(item => item['廃棄年']),
-      masterData: getOptions()
-    };
+    let targetItemId = itemId;
+    let isNewItem = false;
+
+    if (!targetItemId) {
+      isNewItem = true;
+      const newRowIndex = dbSheet.getLastRow() + 1;
+      dbSheet.insertRowAfter(newRowIndex - 1);
+      dbSheet.getRange(newRowIndex, 1).setFormula(`=MAX(A$1:A${newRowIndex - 1}) + 1`);
+      dbSheet.getRange(newRowIndex, 2).setFormula(`=IFERROR(XLOOKUP(D${newRowIndex},'種類番号'!B:B,'種類番号'!A:A,""), "")`);
+      dbSheet.getRange(newRowIndex, 3).setFormula(`=IFERROR(XLOOKUP(E${newRowIndex},'色番号'!B:B,'色番号'!A:A,""), "")`);
+      dbSheet.getRange(newRowIndex, 12).setFormula(`=IF(ISBLANK(J${newRowIndex}), IF(ISBLANK(I${newRowIndex}), "", YEAR(TODAY())-I${newRowIndex}), J${newRowIndex}-I${newRowIndex})`);
+      SpreadsheetApp.flush();
+      targetItemId = dbSheet.getRange(newRowIndex, 1).getDisplayValue();
+      if (!targetItemId) throw new Error('新しいアイテムIDの採番に失敗しました。');
+    }
+    
+    if (fileData && FOLDER_ID) {
+      const folder = DriveApp.getFolderById(FOLDER_ID);
+      const contentType = fileData.substring(5, fileData.indexOf(';'));
+      const bytes = Utilities.base64Decode(fileData.substring(fileData.indexOf('base64,') + 7));
+      const blob = Utilities.newBlob(bytes, contentType, fileName);
+      const extension = fileName.includes('.') ? fileName.split('.').pop() : 'jpg';
+      const newFileName = `${targetItemId}.${extension}`;
+
+      const existingFiles = folder.getFilesByName(newFileName);
+      const file = existingFiles.hasNext() ? existingFiles.next().setContent(blob.getBytes()) : folder.createFile(blob).setName(newFileName);
+      
+      const result = { fileId: file.getId() };
+      if (isNewItem) result.newItemId = targetItemId;
+      return result;
+    }
+    return isNewItem ? { newItemId: targetItemId, fileId: '' } : { fileId: '' };
+
   } catch (e) {
-    console.error('getInitialData Error: ' + e.stack);
-    return { error: '初期データの取得に失敗しました: ' + e.message };
+    console.error(`uploadImage Error: ${e.stack}`);
+    return { error: `処理中にエラーが発生しました: ${e.message}` };
   }
 }
 
-function getOptions() {
-  const getMasterData = (sheet) => {
+//----------------------------------------------------------------
+// データ取得 (Read)
+//----------------------------------------------------------------
+const _cache = CacheService.getScriptCache();
+
+function _getAllSheetValues(sheet) {
+    const cacheKey = `${sheet.getParent().getId()}_${sheet.getName()}`;
+    const cached = _cache.get(cacheKey);
+    if (cached) return JSON.parse(cached);
+
     const lastRow = sheet.getLastRow();
-    if (lastRow < 2) return [];
-    return sheet.getRange(2, 1, lastRow - 1, sheet.getLastColumn()).getDisplayValues()
-      .map(row => ({ id: row[0], name: row[1], code: row[2] || null }))
-      .filter(item => item.id && item.name);
-  };
-  return {
-    categories: getMasterData(categoryMasterSheet),
-    colors: getMasterData(colorMasterSheet)
-  };
+    if (lastRow < 1) return [];
+    const values = sheet.getRange(1, 1, lastRow, sheet.getLastColumn()).getDisplayValues();
+    _cache.put(cacheKey, JSON.stringify(values), 300); // 5分キャッシュ
+    return values;
 }
 
-// 他の単独データ取得関数は、必要に応じて残すか、getInitialDataに統合します。
-// 今回はダッシュボードなどで再利用するため残します。
+function _invalidateCache(sheetName) {
+    const sheet = ss.getSheetByName(sheetName);
+    if (sheet) _cache.remove(`${ss.getId()}_${sheetName}`);
+}
+
+function _getAllItemsFromSheet() {
+  const values = _getAllSheetValues(dbSheet);
+  if (values.length < 2) return [];
+  const headers = values.shift();
+  return values.map(row => headers.reduce((obj, header, i) => {
+      obj[header] = row[i];
+      return obj;
+    }, {})
+  ).filter(item => item['ID']);
+}
+
 function getItems() {
   try {
     return _getAllItemsFromSheet().filter(item => !item['廃棄年']);
   } catch (e) {
-    console.error('getItems Error: ' + e.stack);
+    console.error(`getItems Error: ${e.stack}`);
     return { error: 'アイテムデータの取得中にエラーが発生しました。' };
+  }
+}
+
+function getDisposedItems() {
+  try {
+    return _getAllItemsFromSheet().filter(item => item['廃棄年']);
+  } catch (e) {
+    console.error(`getDisposedItems Error: ${e.stack}`);
+    return { error: '廃棄済みアイテムデータの取得中にエラーが発生しました。' };
+  }
+}
+
+function getOptions() {
+  try {
+    const getMasterData = (sheet) => {
+      const values = _getAllSheetValues(sheet);
+      if (values.length < 2) return [];
+      return values.slice(1).map(row => ({ id: row[0], name: row[1], code: row[2] || null })).filter(item => item.id && item.name);
+    };
+    return {
+      categories: getMasterData(categoryMasterSheet),
+      colors: getMasterData(colorMasterSheet)
+    };
+  } catch (e) {
+    console.error(`getOptions Error: ${e.stack}`);
+    return { error: '選択肢データの取得中にエラーが発生しました。' };
   }
 }
 
@@ -88,541 +146,439 @@ function getDashboardData() {
   try {
     const items = getItems();
     if (items.error) throw new Error(items.error);
-    const itemsById = items.reduce((map, item) => { map[item.ID] = item; return map; }, {});
-    const { totalCost, categoryData, colorData, purchaseData, brandData } = _calculateStats(items);
-    const wearRank = _getWearRank(itemsById);
-    const coordinates = _getCoordinates(itemsById);
-    const colorMaster = getOptions().colors;
-
+    const itemsById = items.reduce((map, item) => (map[item.ID] = item, map), {});
     return {
-      stats: { totalItems: items.length, totalCost: totalCost },
-      categoryData, colorData, purchaseData, brandData, wearRank,
-      coordinates: coordinates.reverse(),
-      colorMaster: colorMaster
+      stats: _calculateStats(items),
+      ..._calculateChartData(items),
+      wearRank: _getWearRank(itemsById),
+      coordinates: _getCoordinates(itemsById).reverse(),
+      colorMaster: getOptions().colors
     };
   } catch (e) {
-    console.error('getDashboardData Error: ' + e.stack);
+    console.error(`getDashboardData Error: ${e.stack}`);
     return { error: 'ダッシュボードデータの生成中にエラーが発生しました。' };
   }
 }
 
+function getUnwornItems() {
+    try {
+        const items = getItems();
+        if (items.error) throw new Error(items.error);
+
+        const wearLogValues = _getAllSheetValues(wearLogSheet);
+        if (wearLogValues.length < 2) {
+             return items.map(item => ({ item, wearCount: 0, lastWear: null }));
+        }
+        
+        const wearData = wearLogValues.slice(1).reduce((acc, row) => {
+            const itemId = row[1];
+            const wearDate = new Date(row[2]);
+            if (!acc[itemId]) acc[itemId] = { count: 0, last: new Date(0) };
+            acc[itemId].count++;
+            if (wearDate > acc[itemId].last) acc[itemId].last = wearDate;
+            return acc;
+        }, {});
+
+        return items.map(item => ({
+            item,
+            wearCount: (wearData[item.ID] || {}).count || 0,
+            lastWear: (wearData[item.ID] || {}).last || null
+        }));
+    } catch(e) {
+        console.error(`getUnwornItems Error: ${e.stack}`);
+        return { error: 'ご無沙汰アイテムの取得に失敗しました。' };
+    }
+}
 
 function getItemDetails(itemId) {
   try {
     if (!itemId) throw new Error('アイテムIDが指定されていません。');
-    const allItems = getItems();
-    if (allItems.error) throw new Error(allItems.error);
-    const itemsById = allItems.reduce((map, item) => { map[item.ID] = item; return map; }, {});
+    const itemsById = getItems().reduce((map, item) => (map[item.ID] = item, map), {});
     const targetItem = itemsById[itemId];
     if (!targetItem) throw new Error('アイテムが見つかりません。');
-    const allCoordinates = _getCoordinates(itemsById);
-    const relatedCoordinates = allCoordinates
-      .filter(coord => coord.itemIds.includes(String(itemId)))
-      .sort((a, b) => b.rating - a.rating);
-    return { item: targetItem, coordinates: relatedCoordinates };
+    
+    return {
+      item: targetItem,
+      coordinates: _getCoordinates(itemsById).filter(coord => coord.itemIds.includes(String(itemId))).sort((a, b) => b.rating - a.rating),
+      wearData: _getWearDataForItem(itemId)
+    };
   } catch (e) {
-    console.error('getItemDetails Error: ' + e.stack);
-    return { error: 'アイテム詳細の取得中にエラーが発生しました: ' + e.message };
+    console.error(`getItemDetails Error: ${e.stack}`);
+    return { error: `アイテム詳細の取得中にエラーが発生しました: ${e.message}` };
+  }
+}
+
+function getWearLogData({year, month}) {
+    try {
+        const itemsById = getItems().reduce((map, item) => (map[item.ID] = item, map), {});
+        const startDate = new Date(year, month - 1, 1);
+        const endDate = new Date(year, month, 0, 23, 59, 59);
+
+        const wearLogValues = _getAllSheetValues(wearLogSheet);
+        if (wearLogValues.length < 2) return {};
+
+        const logs = {};
+        wearLogValues.slice(1).forEach(row => {
+            const logDate = new Date(row[2]);
+            if (logDate >= startDate && logDate <= endDate) {
+                const dateKey = Utilities.formatDate(logDate, 'JST', 'yyyy-MM-dd');
+                const item = itemsById[row[1]];
+                if (item) {
+                    if (!logs[dateKey]) logs[dateKey] = [];
+                    logs[dateKey].push({ logId: row[0], item: item });
+                }
+            }
+        });
+        return logs;
+    } catch (e) {
+        console.error(`getWearLogData Error: ${e.stack}`);
+        return { error: '着用カレンダーのデータ取得に失敗しました。' };
+    }
+}
+
+// --- AI関連 ---
+function _callGeminiAPI(prompt, isJsonOutput = false, images = []) {
+  if (!API_KEY) throw new Error('Gemini APIキーがスクリプトプロティに設定されていません。');
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent?key=${API_KEY}`;
+  
+  const parts = [{ "text": prompt }];
+  if (images && images.length > 0) {
+      images.forEach(image => parts.push({"inline_data": {"mime_type": image.mimeType, "data": image.base64}}));
+  }
+
+  const payload = { "contents": [{ "parts": parts }] };
+  if (isJsonOutput) {
+    payload.generation_config = { "response_mime_type": "application/json" };
+  }
+  
+  const options = { 'method': 'post', 'contentType': 'application/json', 'payload': JSON.stringify(payload) };
+  const response = UrlFetchApp.fetch(url, options);
+  const result = JSON.parse(response.getContentText());
+
+  if (result.candidates && result.candidates[0].content) {
+    let text = result.candidates[0].content.parts[0].text;
+    if (isJsonOutput) {
+       text = text.replace(/```json/g, '').replace(/```/g, '').trim();
+       return JSON.parse(text);
+    }
+    return text;
+  }
+  console.error("Gemini API response format error: ", JSON.stringify(result));
+  throw new Error('AIからの応答を解析できませんでした。');
+}
+
+function getStyleSuggestion({ baseItemId, customRequest }) {
+  try {
+    const { allItems, itemsById, favoriteCoordsPrompt, wardrobeForPrompt } = _prepareAiContext();
+    const baseItem = itemsById[baseItemId];
+    if (!baseItem) throw new Error('基準となるアイテムが見つかりません。');
+    
+    const baseItemForPrompt = `ID: ${baseItem.ID}, Name: ${baseItem['名前']}, Category: ${baseItem['種類']}, Color: ${baseItem['色']}, Season: ${baseItem['着用シーズン'] || '未設定'}, Formality: ${baseItem['フォーマル度'] || '未設定'}`;
+    
+    const prompt = `あなたは私の好みを深く理解したプロのファッションスタイリストです。以下の情報を元に、「基準アイテム」に合うコーディネートを最大3つ提案してください。
+提案は必ず「手持ちの服リスト」内のアイテムから選び、結果は有効なJSON配列としてのみ出力してください。各コーデは "item_ids" と "reason" をキーに持つオブジェクトとします。
+${customRequest ? `# 要望\n- ${customRequest.trim()}\n` : ''}${favoriteCoordsPrompt}
+# 手持ちの服リスト\n${wardrobeForPrompt}
+# 基準アイテム\n${baseItemForPrompt}`;
+
+    const suggestions = _callGeminiAPI(prompt, true);
+    return { suggestions: suggestions.map(coord => ({
+        items: coord.item_ids.map(id => allItems.find(item => item.ID == id)).filter(Boolean),
+        reason: coord.reason
+    }))};
+  } catch (e) {
+    console.error(`getStyleSuggestion Error: ${e.stack}`);
+    return { error: `提案の生成中にエラーが発生しました: ${e.message}` };
+  }
+}
+
+function analyzeImagesWithAI(images) {
+  try {
+    const optionsData = getOptions();
+    if (optionsData.error) throw new Error(optionsData.error);
+    const prompt = `提供された画像を分析し、衣類アイテムの情報を抽出してください。
+「種類」は[${optionsData.categories.map(c => c.name).join(', ')}]から、
+「色」は[${optionsData.colors.map(c => c.name).join(', ')}]から選んでください。
+「着用シーズン」は["春", "夏", "秋", "冬"]の配列、「フォーマル度」は1～5の数値で回答してください。
+不明な項目は空文字 "" または空の配列 [] としてください。
+返答は以下のJSONスキーマに従ってください:
+{"type": "OBJECT", "properties": {"名前": {"type": "STRING"}, "種類": {"type": "STRING"}, "色": {"type": "STRING"}, "素材": {"type": "STRING"}, "柄": {"type": "STRING"}, "着用シーズン": {"type": "ARRAY", "items": {"type": "STRING"}}, "フォーマル度": {"type": "NUMBER"}, "メモ": {"type": "STRING"}}}`;
+    
+    const itemData = _callGeminiAPI(prompt, true, images);
+    return { data: itemData };
+  } catch (e) {
+    console.error(`analyzeImagesWithAI Error: ${e.stack}`);
+    return { error: `画像解析中にエラーが発生しました: ${e.message}` };
+  }
+}
+
+function getAiConsultation({ userQuestion, images }) {
+  try {
+    const { favoriteCoordsPrompt, wardrobeForPrompt } = _prepareAiContext();
+    const prompt = `あなたは私の専属ファッションスタイリストです。以下の情報を参考に、私の質問に具体的かつ簡潔に回答してください。挨拶や前置き、結びの言葉は不要です。私のワードローブのアイテムを提案する場合は「ID:〇〇」と明記してください。
+# 私のワードローブ\n${wardrobeForPrompt}\n${favoriteCoordsPrompt}
+---
+# 私からの質問\n${userQuestion}`;
+
+    const answer = _callGeminiAPI(prompt, false, images);
+    return { answer };
+  } catch (e) {
+    console.error(`getAiConsultation Error: ${e.stack}`);
+    return { error: `AIへの相談中にエラーが発生しました: ${e.message}` };
   }
 }
 
 
 //----------------------------------------------------------------
-// データ更新 (Create/Update/Delete) - パフォーマンスと保守性を改善
+// データ更新 (Create/Update/Delete)
 //----------------------------------------------------------------
-
 function saveItem(itemData) {
   try {
-    const headers = _getHeaders(dbSheet);
+    const headers = _getAllSheetValues(dbSheet)[0];
     const formulaColumns = ['ID', '種類番号', '色番号', '着用年数'];
-    let targetRow;
-    let message;
+    const dataToWrite = { ...itemData };
+    dataToWrite['種類'] = masterIdToName(itemData['種類番号'], categoryMasterSheet);
+    dataToWrite['色'] = masterIdToName(itemData['色番号'], colorMasterSheet);
 
-    if (itemData.id) {
-      targetRow = _findRowById(dbSheet, itemData.id);
-      if (!targetRow) throw new Error('指定されたIDのアイテムが見つかりません。');
-      message = 'アイテムを更新しました。';
-    } else {
-      // 画像なしで新規登録する場合のフォールバック
-      const tempResult = _prepareNewItemRow();
-      targetRow = tempResult.rowIndex;
-      itemData.id = tempResult.newItemId;
-      message = '新しいアイテムを登録しました。';
-    }
+    const range = dbSheet.getRange("A:A").createTextFinder(String(itemData.id)).findNext();
+    if (!range) throw new Error('指定されたIDのアイテムが見つかりません。');
+    const targetRow = range.getRow();
 
-    const targetRange = dbSheet.getRange(targetRow, 1, 1, headers.length);
-    const currentValues = targetRange.getValues()[0];
-
-    const newValues = headers.map((header, i) => {
-      if (formulaColumns.includes(header)) return currentValues[i];
-      if (header === '種類') return masterIdToName(itemData['種類番号'], categoryMasterSheet);
-      if (header === '色') return masterIdToName(itemData['色番号'], colorMasterSheet);
-      return (header in itemData) ? itemData[header] : currentValues[i];
+    const rowValues = headers.map(header => {
+      if (formulaColumns.includes(header)) return dbSheet.getRange(targetRow, headers.indexOf(header) + 1).getFormula() || null;
+      return dataToWrite[header] !== undefined ? dataToWrite[header] : null;
     });
-
-    targetRange.setValues([newValues]);
-    SpreadsheetApp.flush();
-
-    const updatedItem = _convertRowToObject(dbSheet.getRange(targetRow, 1, 1, headers.length).getDisplayValues()[0], headers);
-    return { status: 'success', message, item: updatedItem };
-
+    
+    dbSheet.getRange(targetRow, 1, 1, headers.length).setValues([rowValues]);
+    _invalidateCache('データベース');
+    return { status: 'success', message: 'アイテムを更新しました。' };
   } catch (e) {
-    console.error('saveItem Error: ' + e.stack);
-    return { status: 'error', message: '保存に失敗しました: ' + e.message };
+    console.error(`saveItem Error: ${e.stack}`);
+    return { status: 'error', message: `保存に失敗しました: ${e.message}` };
   }
 }
 
-function uploadImage(payload) {
-  const { fileData, fileName, itemId } = payload;
-  try {
-    checkConfiguration();
-    let targetItemId = itemId;
-    let isNewItem = false;
-
-    if (!targetItemId) {
-      isNewItem = true;
-      const newRowData = _prepareNewItemRow();
-      targetItemId = newRowData.newItemId;
-    }
-
-    if (fileData) {
-      const folder = DriveApp.getFolderById(FOLDER_ID);
-      const contentType = fileData.substring(5, fileData.indexOf(';'));
-      const bytes = Utilities.base64Decode(fileData.substring(fileData.indexOf('base64,') + 7));
-      const blob = Utilities.newBlob(bytes, contentType, fileName);
-      const extension = fileName.includes('.') ? fileName.split('.').pop() : 'jpg';
-      const newFileName = `${targetItemId}.${extension}`;
-      
-      const existingFiles = folder.getFilesByName(newFileName);
-      const file = existingFiles.hasNext() ? existingFiles.next().setContent(blob.getBytes()) : folder.createFile(blob).setName(newFileName);
-
-      const result = { fileId: file.getId() };
-      if (isNewItem) result.newItemId = targetItemId;
-      return result;
-    }
-
-    return isNewItem ? { newItemId: targetItemId, fileId: '' } : { fileId: '' };
-  } catch (e) {
-    console.error('uploadImage Error: ' + e.stack);
-    return { error: '画像処理中にエラーが発生しました: ' + e.message };
-  }
+function _findRowByIdAndSetColumn(sheet, id, headerName, value, cacheNameToInvalidate) {
+    const headers = _getAllSheetValues(sheet)[0];
+    const colIndex = headers.indexOf(headerName);
+    if (colIndex === -1) throw new Error(`${headerName}列が見つかりません。`);
+    
+    const range = sheet.getRange("A:A").createTextFinder(String(id)).findNext();
+    if (!range) throw new Error('指定されたIDが見つかりません。');
+    
+    sheet.getRange(range.getRow(), colIndex + 1).setValue(value);
+    if(cacheNameToInvalidate) _invalidateCache(cacheNameToInvalidate);
 }
 
 function deleteItem(id) {
-  try {
-    if (!id) throw new Error('IDが指定されていません。');
-    const targetRow = _findRowById(dbSheet, id);
-    if (!targetRow) throw new Error('指定されたIDのアイテムが見つかりません。');
-
-    const headers = _getHeaders(dbSheet);
-    const disposeColIndex = headers.indexOf('廃棄年');
-    if (disposeColIndex === -1) throw new Error('廃棄年列が見つかりません。');
-    
-    const today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy/MM/dd');
-    dbSheet.getRange(targetRow, disposeColIndex + 1).setValue(today);
-
-    return { status: 'success', message: 'アイテムを廃棄済みにしました。', itemId: id };
-  } catch (e) {
-    console.error('deleteItem Error: ' + e.stack);
-    return { status: 'error', message: e.message };
-  }
+    try {
+        _findRowByIdAndSetColumn(dbSheet, id, '廃棄年', new Date(), 'データベース');
+        return { status: 'success', message: 'アイテムを廃棄済みにしました。' };
+    } catch (e) {
+        console.error(`deleteItem Error: ${e.stack}`);
+        return { status: 'error', message: e.message };
+    }
 }
 
 function restoreItem(id) {
-  try {
-    if (!id) throw new Error('IDが指定されていません。');
-    const targetRow = _findRowById(dbSheet, id);
-    if (!targetRow) throw new Error('指定されたIDのアイテムが見つかりません。');
-    
-    const headers = _getHeaders(dbSheet);
-    const disposeColIndex = headers.indexOf('廃棄年');
-    if (disposeColIndex === -1) throw new Error('廃棄年列が見つかりません。');
-
-    dbSheet.getRange(targetRow, disposeColIndex + 1).clearContent();
-    SpreadsheetApp.flush();
-
-    const restoredItem = _convertRowToObject(dbSheet.getRange(targetRow, 1, 1, headers.length).getDisplayValues()[0], headers);
-    return { status: 'success', message: 'アイテムを元に戻しました。', item: restoredItem };
-  } catch (e) {
-    console.error('restoreItem Error: ' + e.stack);
-    return { status: 'error', message: e.message };
-  }
+    try {
+        _findRowByIdAndSetColumn(dbSheet, id, '廃棄年', '', 'データベース');
+        return { status: 'success', message: 'アイテムを元に戻しました。' };
+    } catch (e) {
+        console.error(`restoreItem Error: ${e.stack}`);
+        return { status: 'error', message: e.message };
+    }
 }
 
 function logWear(itemId) {
   try {
-    if (!itemId) throw new Error('アイテムIDが指定されていません。');
     const newRowIndex = wearLogSheet.getLastRow() + 1;
     wearLogSheet.getRange(newRowIndex, 1).setFormula(`=MAX(A$1:A${newRowIndex - 1}) + 1`);
     wearLogSheet.getRange(newRowIndex, 2, 1, 2).setValues([[itemId, new Date()]]);
+    _invalidateCache('着用ログ');
     return { status: 'success', message: '着用を記録しました！' };
   } catch (e) {
-    console.error('logWear Error: ' + e.stack);
+    console.error(`logWear Error: ${e.stack}`);
     return { status: 'error', message: '着用記録に失敗しました。' };
   }
 }
 
-
-function saveCoordinate(payload) {
-  const { itemIds, rating, reason, coordId } = payload;
+function saveCoordinate({ itemIds, rating, reason, coordId }) {
   try {
     if (!itemIds || itemIds.length === 0) throw new Error('アイテムが選択されていません。');
     const sortedIds = [...itemIds].sort((a, b) => a - b).join(',');
 
     if (coordId) {
-      const targetRow = _findRowById(coordLogSheet, coordId);
-      if (!targetRow) throw new Error('指定されたIDのコーデが見つかりません。');
-      coordLogSheet.getRange(targetRow, 2).setValue(sortedIds);
-      if (rating !== undefined) coordLogSheet.getRange(targetRow, 3).setValue(rating);
-      if (reason !== undefined) coordLogSheet.getRange(targetRow, 5).setValue(reason);
+      const range = coordLogSheet.getRange("A:A").createTextFinder(String(coordId)).findNext();
+      if (!range) throw new Error('指定されたIDのコーデが見つかりません。');
+      coordLogSheet.getRange(range.getRow(), 2).setValue(sortedIds);
+      if (rating !== undefined) coordLogSheet.getRange(range.getRow(), 3).setValue(rating);
+      if (reason !== undefined) coordLogSheet.getRange(range.getRow(), 5).setValue(reason);
+      _invalidateCache('コーディネートログ');
       return { status: 'success', message: 'コーディネートを更新しました！' };
     }
     
     const lastRow = coordLogSheet.getLastRow();
     if (lastRow > 1) {
       const existingCoords = coordLogSheet.getRange(2, 2, lastRow - 1, 1).getValues().flat();
-      if (existingCoords.some(c => String(c).split(',').sort().join(',') === sortedIds)) {
+      if (existingCoords.some(c => String(c).split(',').sort((a, b) => a - b).join(',') === sortedIds)) {
         return { status: 'error', message: '同じ組み合わせのコーデが既に保存されています。' };
       }
     }
     
     const newRowIndex = lastRow + 1;
     coordLogSheet.getRange(newRowIndex, 1).setFormula(`=MAX(A$1:A${newRowIndex - 1}) + 1`);
-    const newRowData = [sortedIds, (rating || ''), new Date(), reason || ''];
-    coordLogSheet.getRange(newRowIndex, 2, 1, newRowData.length).setValues([newRowData]);
+    coordLogSheet.getRange(newRowIndex, 2, 1, 4).setValues([[sortedIds, (rating || ''), new Date(), (reason || '')]]);
+    _invalidateCache('コーディネートログ');
     return { status: 'success', message: 'コーディネートを保存しました！' };
   } catch (e) {
-    console.error('saveCoordinate Error: ' + e.stack);
+    console.error(`saveCoordinate Error: ${e.stack}`);
     return { status: 'error', message: 'コーディネートの保存に失敗しました。' };
   }
 }
 
 function deleteCoordinate(coordId) {
-  try {
-    if (!coordId) throw new Error('コーデIDが指定されていません。');
-    const targetRow = _findRowById(coordLogSheet, coordId);
-    if (!targetRow) throw new Error('指定されたIDのコーデが見つかりません。');
-    coordLogSheet.deleteRow(targetRow);
-    return { status: 'success', message: 'コーデを削除しました。' };
-  } catch (e) {
-    console.error('deleteCoordinate Error: ' + e.stack);
-    return { status: 'error', message: 'コーデの削除に失敗しました。' };
-  }
+    try {
+        const range = coordLogSheet.getRange("A:A").createTextFinder(String(coordId)).findNext();
+        if (!range) throw new Error('指定されたIDのコーデが見つかりません。');
+        coordLogSheet.deleteRow(range.getRow());
+        _invalidateCache('コーディネートログ');
+        return { status: 'success', message: 'コーデを削除しました。' };
+    } catch (e) {
+        console.error(`deleteCoordinate Error: ${e.stack}`);
+        return { status: 'error', message: 'コーデの削除に失敗しました。' };
+    }
 }
 
-function updateCoordinateRating(payload) {
-  const { coordId, rating } = payload;
+function updateCoordinateRating({ coordId, rating }) {
   try {
-    if (!coordId || !rating) throw new Error('IDまたは評価が指定されていません。');
-    const targetRow = _findRowById(coordLogSheet, coordId);
-    if (!targetRow) throw new Error('指定されたIDのコーデが見つかりません。');
-    coordLogSheet.getRange(targetRow, 3).setValue(rating);
+    _findRowByIdAndSetColumn(coordLogSheet, coordId, '評価', rating, 'コーディネートログ');
     return { status: 'success', message: '評価を更新しました。' };
   } catch (e) {
-    console.error('updateCoordinateRating Error: ' + e.stack);
+    console.error(`updateCoordinateRating Error: ${e.stack}`);
     return { status: 'error', message: '評価の更新に失敗しました。' };
   }
 }
 
 function logCoordinateWear(itemIds) {
   try {
-    if (!itemIds || !Array.isArray(itemIds) || itemIds.length === 0) {
-      throw new Error('アイテムIDが指定されていません。');
-    }
     const timestamp = new Date();
-    const rowsToAdd = itemIds.map(id => ['', id, timestamp]);
-    wearLogSheet.getRange(wearLogSheet.getLastRow() + 1, 1, rowsToAdd.length, 3).setValues(rowsToAdd);
-    
-    // ID列の数式を一括で設定
-    const lastRow = wearLogSheet.getLastRow();
-    const startRow = lastRow - itemIds.length + 1;
-    const idFormulas = Array.from({ length: itemIds.length }, (_, i) => [`=MAX(A$1:A${startRow + i - 1}) + 1`]);
-    wearLogSheet.getRange(startRow, 1, itemIds.length, 1).setFormulas(idFormulas);
-    
+    itemIds.forEach(itemId => {
+      const lastRow = wearLogSheet.getLastRow();
+      wearLogSheet.appendRow(['', itemId, timestamp]);
+      wearLogSheet.getRange(lastRow + 1, 1).setFormula(`=MAX(A$1:A${lastRow}) + 1`);
+    });
+    _invalidateCache('着用ログ');
     return { status: 'success', message: `${itemIds.length}点の着用を記録しました！` };
   } catch (e) {
-    console.error('logCoordinateWear Error: ' + e.stack);
+    console.error(`logCoordinateWear Error: ${e.stack}`);
     return { status: 'error', message: '着用記録に失敗しました。' };
   }
 }
 
-//----------------------------------------------------------------
-// AI 関連関数 - 堅牢性を向上
-//----------------------------------------------------------------
-function getStyleSuggestion(payload) {
-  try {
-    checkConfiguration();
-    const { baseItemId, customRequest } = payload;
-    const { allItems, itemsById, favoriteCoordsPrompt, wardrobeForPrompt } = _prepareAiContext();
-    const baseItem = itemsById[baseItemId];
-    if (!baseItem) throw new Error('基準となるアイテムが見つかりません。');
-
-    const prompt = `あなたは私の好みを深く理解した、プロのファッションスタイリストです。
-以下の情報を総合的に判断し、「基準アイテム」に合うコーディネートを最大3つ提案してください。
-特に、以下の「今回の要望」を最優先で考慮してください。
-次に、「私のお気に入りコーデ」を私の好みの参考としてください。
-その上で、各アイテムの「Season」や「Formality」を参考にし、TPOに合った組み合わせを提案してください。
-提案は必ず「手持ちの服リスト」内のアイテムから選びます。結果は、前後に他のテキストを一切含まず、有効なJSON形式の配列としてのみ出力してください。
-各コーディネートはオブジェクトとし、以下のキーを含めてください:
-1. "item_ids": 基準アイテムと提案アイテムのIDを含む配列 (例: ["${baseItem.ID}", "102"])
-2. "reason": そのコーディネートの提案理由を、TPOや私の好みを考慮した上で一行で記述した文字列
-${customRequest ? `# 今回の要望（最優先事項）\n- ${customRequest.trim()}\n\n` : ''}${favoriteCoordsPrompt}# 手持ちの服リスト
-${wardrobeForPrompt}
-# 基準アイテム
-ID: ${baseItem.ID}, Name: ${baseItem['名前']}, Category: ${baseItem['種類']}, Color: ${baseItem['色']}, Season: ${baseItem['着用シーズン'] || '未設定'}, Formality: ${baseItem['フォーマル度'] || '未設定'}`;
-
-    const result = _getAiResponse(prompt, false);
-    const suggestions = JSON.parse(result);
-    const detailedSuggestions = suggestions.map(coord => ({
-      items: coord.item_ids.map(id => allItems.find(item => item.ID == id)).filter(Boolean),
-      reason: coord.reason
-    }));
-    return { suggestions: detailedSuggestions };
-
-  } catch (e) {
-    console.error('getStyleSuggestion Error: ' + e.stack);
-    return { error: '提案の生成中にエラーが発生しました: ' + e.message };
-  }
+function deleteWearLog(wearLogId) {
+    try {
+        const range = wearLogSheet.getRange("A:A").createTextFinder(String(wearLogId)).findNext();
+        if (!range) throw new Error('指定されたIDの着用記録が見つかりません。');
+        wearLogSheet.deleteRow(range.getRow());
+        _invalidateCache('着用ログ');
+        return { status: 'success', message: '着用記録を削除しました。' };
+    } catch (e) {
+        console.error(`deleteWearLog Error: ${e.stack}`);
+        return { status: 'error', message: '着用記録の削除に失敗しました。' };
+    }
 }
-
-function analyzeImagesWithAI(images) {
-  try {
-    checkConfiguration();
-    const optionsData = getOptions();
-    if (optionsData.error) throw new Error(optionsData.error);
-    const prompt = `あなたはプロのファッションアイテムアナリストです。
-提供された複数の画像を総合的に分析し、一つの衣類アイテムに関する情報を抽出してください。
-以下のルールに従って、指定されたJSONスキーマの形式で回答してください。
-- 「種類」と「色」は、必ず指定された選択肢リストの中から最も近いものを一つだけ選んでください。
-- 「着用シーズン」は、「春」「夏」「秋」「冬」の中から当てはまるものを全て含んだ配列で回答してください。
-- 「フォーマル度」は、1（カジュアル）から5（フォーマル）の5段階で評価してください。
-- 「メモ」には、アイテムの特筆すべきデザイン、素材感、コーディネートのヒントなどを簡潔に記述してください。
-- 不明な項目は空文字 "" または空の配列 [] としてください。
-# 種類選択肢リスト
-${optionsData.categories.map(c => c.name).join(', ')}
-# 色選択肢リスト
-${optionsData.colors.map(c => c.name).join(', ')}`;
-    
-    const requestBody = {
-      "contents": [{"parts": [{ "text": prompt }, ...images.map(image => ({"inline_data": {"mime_type": image.mimeType, "data": image.base64}}))] }],
-      "generation_config": {
-        "response_mime_type": "application/json",
-        "response_schema": { /* ... スキーマ定義 ... */ }
-      }
-    };
-    // スキーマ定義は長いため省略
-    requestBody.generation_config.response_schema = { "type": "OBJECT", "properties": { "名前": { "type": "STRING" }, "種類": { "type": "STRING" }, "色": { "type": "STRING" }, "素材": { "type": "STRING" }, "柄": { "type": "STRING" }, "着用シーズン": { "type": "ARRAY", "items": { "type": "STRING" } }, "フォーマル度": { "type": "NUMBER" }, "メモ": { "type": "STRING" }}};
-
-    const result = _getAiResponse(requestBody, true, "gemini-2.5-flash");
-    return { data: JSON.parse(result) };
-
-  } catch (e) {
-    console.error('analyzeImagesWithAI Error: ' + e.stack);
-    return { error: '画像解析中にエラーが発生しました: ' + e.message };
-  }
-}
-
-function getAiConsultation(userQuestion) {
-  try {
-    checkConfiguration();
-    const prompt = _buildConsultationPrompt(userQuestion);
-    return { answer: _getAiResponse(prompt, false) };
-  } catch (e) {
-    console.error('getAiConsultation Error: ' + e.stack);
-    return { error: 'AIへの相談中にエラーが発生しました: ' + e.message };
-  }
-}
-
-function getAiConsultationWithImages(payload) {
-  try {
-    checkConfiguration();
-    const { userQuestion, images } = payload;
-    const prompt = _buildConsultationPrompt(userQuestion);
-    const requestBody = { "contents": [{"parts": [{ "text": prompt }, ...images.map(image => ({"inline_data": {"mime_type": image.mimeType, "data": image.base64}}))] }] };
-    return { answer: _getAiResponse(requestBody, true) };
-  } catch (e) {
-    console.error('getAiConsultationWithImages Error: ' + e.stack);
-    return { error: 'AIへの相談中にエラーが発生しました: ' + e.message };
-  }
-}
-
 
 //----------------------------------------------------------------
-// 内部ヘルパー関数
+// ヘルパー関数
 //----------------------------------------------------------------
-
-let memoizedHeaders = {};
-function _getHeaders(sheet) {
-  const sheetName = sheet.getName();
-  if (!memoizedHeaders[sheetName]) {
-    memoizedHeaders[sheetName] = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-  }
-  return memoizedHeaders[sheetName];
-}
-
-function _convertRowToObject(row, headers) {
-  const obj = {};
-  headers.forEach((header, i) => { obj[header] = row[i]; });
-  return obj;
-}
-
-function _getAllItemsFromSheet() {
-  const lastRow = dbSheet.getLastRow();
-  if (lastRow < 2) return [];
-  const headers = _getHeaders(dbSheet);
-  const values = dbSheet.getRange(2, 1, lastRow - 1, headers.length).getDisplayValues();
-  return values.map(row => _convertRowToObject(row, headers)).filter(item => item['ID']);
-}
-
 function masterIdToName(id, sheet) {
   if (!id) return '';
-  const lastRow = sheet.getLastRow();
-  if (lastRow < 2) return '';
-  const data = sheet.getRange(2, 1, lastRow - 1, 2).getDisplayValues();
-  const match = data.find(row => row[0] == id);
+  const data = _getAllSheetValues(sheet);
+  if (data.length < 2) return '';
+  const match = data.slice(1).find(row => row[0] == id);
   return match ? match[1] : '';
 }
 
-function _findRowById(sheet, id) {
-  const range = sheet.getRange("A:A").createTextFinder(String(id)).findNext();
-  return range ? range.getRow() : null;
-}
-
-function _prepareNewItemRow() {
-  const newRowIndex = dbSheet.getLastRow() + 1;
-  dbSheet.insertRowAfter(newRowIndex - 1);
-  dbSheet.getRange(newRowIndex, 1).setFormula(`=MAX(A$1:A${newRowIndex - 1}) + 1`);
-  dbSheet.getRange(newRowIndex, 2).setFormula(`=IFERROR(XLOOKUP(D${newRowIndex},'種類番号'!B:B,'種類番号'!A:A,""), "")`);
-  dbSheet.getRange(newRowIndex, 3).setFormula(`=IFERROR(XLOOKUP(E${newRowIndex},'色番号'!B:B,'色番号'!A:A,""), "")`);
-  dbSheet.getRange(newRowIndex, 12).setFormula(`=IF(ISBLANK(J${newRowIndex}), IF(ISBLANK(I${newRowIndex}), "", YEAR(TODAY())-I${newRowIndex}), J${newRowIndex}-I${newRowIndex})`);
-  SpreadsheetApp.flush();
-  const newItemId = dbSheet.getRange(newRowIndex, 1).getDisplayValue();
-  if (!newItemId) {
-    dbSheet.deleteRow(newRowIndex);
-    throw new Error('新しいアイテムIDの採番に失敗しました。');
-  }
-  return { rowIndex: newRowIndex, newItemId: newItemId };
-}
-
-
-function _calculateStats(items) { /* ... 変更なし ... */ return { totalCost:0, categoryData:{}, colorData:{}, purchaseData:{}, brandData:{} }; }
-function _getWearRank(itemsById) { /* ... 変更なし ... */ return []; }
-function _getCoordinates(itemsById) { /* ... 変更なし ... */ return []; }
-// For brevity, the content of these helper functions remains the same as your original code.
-// They are correct and don't need refactoring.
 function _calculateStats(items) {
-  let totalCost = 0;
+  return {
+      totalItems: items.length,
+      totalCost: items.reduce((sum, item) => sum + (parseFloat(String(item['価格']).replace(/[^0-9.-]+/g, '')) || 0), 0)
+  };
+}
+
+function _calculateChartData(items) {
   const categoryData = {}, colorData = {}, purchaseData = {}, brandData = {};
-  
   items.forEach(item => {
     const price = parseFloat(String(item['価格']).replace(/[^0-9.-]+/g, '')) || 0;
-    totalCost += price;
     categoryData[item['種類'] || '未分類'] = (categoryData[item['種類'] || '未分類'] || 0) + 1;
     colorData[item['色'] || '未分類'] = (colorData[item['色'] || '未分類'] || 0) + 1;
-    if (item['購入年'] && item['購入年'] > 1900) { purchaseData[item['購入年']] = (purchaseData[item['購入年']] || 0) + price; }
+    if (item['購入年'] && item['購入年'] > 1900) purchaseData[item['購入年']] = (purchaseData[item['購入年']] || 0) + price;
     const brand = item['ブランド'] || '不明';
-    if (!brandData[brand]) { brandData[brand] = { count: 0, amount: 0 }; }
+    if (!brandData[brand]) brandData[brand] = { count: 0, amount: 0 };
     brandData[brand].count++;
     brandData[brand].amount += price;
   });
-  return { totalCost, categoryData, colorData, purchaseData, brandData };
+  return { categoryData, colorData, purchaseData, brandData };
 }
 
 function _getWearRank(itemsById) {
-  const wearCount = {};
-  const wearLogLastRow = wearLogSheet.getLastRow();
-  if (wearLogLastRow < 2) return [];
-  const wearLogData = wearLogSheet.getRange(2, 2, wearLogLastRow - 1, 1).getDisplayValues().flat();
-  wearLogData.forEach(itemId => { if (itemId) { wearCount[itemId] = (wearCount[itemId] || 0) + 1; } });
+  const wearLogData = _getAllSheetValues(wearLogSheet);
+  if (wearLogData.length < 2) return [];
+  const wearCount = wearLogData.slice(1).reduce((acc, row) => {
+    const itemId = row[1];
+    if (itemId) acc[itemId] = (acc[itemId] || 0) + 1;
+    return acc;
+  }, {});
   return Object.entries(wearCount)
-    .sort(([, countA], [, countB]) => countB - countA)
-    .slice(0, 10)
-    .map(([itemId, count]) => ({ item: itemsById[itemId], count: count }))
-    .filter(entry => entry.item);
+    .sort(([, countA], [, countB]) => countB - countA).slice(0, 10)
+    .map(([itemId, count]) => ({ item: itemsById[itemId], count })).filter(e => e.item);
 }
 
 function _getCoordinates(itemsById) {
-    const coordLogLastRow = coordLogSheet.getLastRow();
-    if (coordLogLastRow < 2) return [];
-    const coordLogData = coordLogSheet.getRange(2, 1, coordLogLastRow - 1, 5).getDisplayValues();
-    return coordLogData.map(row => {
-        const itemIds = String(row[1]).split(',');
-        return {
-          id: row[0],
-          itemIds: itemIds,
-          rating: row[2] || 0,
-          items: itemIds.map(id => itemsById[id.trim()]).filter(Boolean),
-          reason: row[4] || ''
-        };
+  const coordLogData = _getAllSheetValues(coordLogSheet);
+  if (coordLogData.length < 2) return [];
+  return coordLogData.slice(1).map(row => {
+      const itemIds = String(row[1]).split(',');
+      return {
+        id: row[0], itemIds, rating: row[2] || 0,
+        items: itemIds.map(id => itemsById[id.trim()]).filter(Boolean),
+        reason: row[4] || ''
+      };
+  });
+}
+
+function _getWearDataForItem(itemId) {
+    const wearLogValues = _getAllSheetValues(wearLogSheet);
+    if (wearLogValues.length < 2) return { total: 0, byYear: {}, history: [] };
+    
+    const history = [];
+    const byYear = {};
+    wearLogValues.slice(1).forEach(row => {
+        if (row[1] == itemId) {
+            const wearDate = new Date(row[2]);
+            history.push(wearDate);
+            const year = wearDate.getFullYear();
+            byYear[year] = (byYear[year] || 0) + 1;
+        }
     });
+    
+    history.sort((a, b) => b - a); // Newest first
+    return {
+        total: history.length,
+        byYear: byYear,
+        history: history.slice(0, 10) // Return last 10
+    };
 }
 
 function _prepareAiContext() {
   const allItems = getItems();
-  if (allItems.error) throw new Error(allItems.error);
-  const itemsById = allItems.reduce((map, item) => { map[item.ID] = item; return map; }, {});
-
-  let favoriteCoordsPrompt = '';
-  const coordLogLastRow = coordLogSheet.getLastRow();
-  if (coordLogLastRow >= 2) {
-    const favoriteCoords = coordLogSheet.getRange(2, 1, coordLogLastRow - 1, 3).getValues()
-      .filter(row => row[2] && Number(row[2]) >= 4)
-      .map(row => String(row[1]).split(',').map(id => itemsById[id.trim()] ? itemsById[id.trim()]['名前'] : null).filter(Boolean).join(' と '))
-      .slice(-10);
-    if (favoriteCoords.length > 0) {
-      favoriteCoordsPrompt = '# 私のお気に入りコーデ（高評価の組み合わせ参考例）\n' + favoriteCoords.map(c => `- ${c}`).join('\n') + '\n\n';
-    }
-  }
-  const wardrobeForPrompt = allItems.map(item => `ID: ${item.ID}, Name: ${item['名前']}, Category: ${item['種類']}, Color: ${item['色']}, Season: ${item['着用シーズン'] || '未設定'}, Formality: ${item['フォーマル度'] || '未設定'}`).join('\n');
-  return { allItems, itemsById, favoriteCoordsPrompt, wardrobeForPrompt };
-}
-
-function _buildConsultationPrompt(userQuestion) {
-  const { favoriteCoordsPrompt, wardrobeForPrompt } = _prepareAiContext();
-  const simpleWardrobe = wardrobeForPrompt.split('\n').map(line => {
-    const match = line.match(/ID: (\d+), Name: (.*?), Category: (.*?), Color: (.*?), Season: (.*?), Formality: (.*)/);
-    return match ? `- ID:${match[1]}, ${match[2]} (${match[3]}, ${match[4]}, ${match[5]})` : null;
-  }).filter(Boolean).join('\n');
-  const simpleFavs = favoriteCoordsPrompt.replace('# 私のお気に入りコーデ（高評価の組み合わせ参考例）', '## 私の好きなコーデの傾向').replace(/\n\n$/, '');
-
-  return `あなたは私の専属ファッションスタイリストです。以下の情報を参考に、私の質問に回答してください。
-# 指示
-- 質問に対して、具体的かつ簡潔に回答してください。
-- 挨拶や前置き、結びの言葉は一切不要です。
-- 回答には、マークダウンを使用しないでください。
-- 私のワードローブにあるアイテムを提案する場合は、必ず「ID:〇〇」の形式でアイテムIDを明記してください。
-- 添付画像がある場合、それも考慮して回答してください。
-# 私のワードローブ
-${simpleWardrobe}
-${simpleFavs}
----
-# 私からの質問
-${userQuestion}`;
-}
-
-
-function _getAiResponse(payload, isComplexPayload = false, model = 'gemini-2.5-pro') {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`;
-  const requestBody = isComplexPayload ? payload : { "contents": [{ "parts": [{ "text": payload }] }] };
-  const options = { 'method': 'post', 'contentType': 'application/json', 'payload': JSON.stringify(requestBody), 'muteHttpExceptions': true };
-  const response = UrlFetchApp.fetch(url, options);
-  const responseCode = response.getResponseCode();
-  const resultText = response.getContentText();
-
-  if (responseCode !== 200) {
-    console.error(`Gemini API Error (Code: ${responseCode}): ${resultText}`);
-    throw new Error(`AIとの通信に失敗しました。`);
-  }
-  try {
-    const result = JSON.parse(resultText);
-    if (result.candidates && result.candidates[0].content) {
-      let text = result.candidates[0].content.parts[0].text;
-      return text.replace(/```json/g, '').replace(/```/g, '').trim();
-    }
-    throw new Error('AIからの応答が予期せぬ形式でした。');
-  } catch (e) {
-    console.error('AI Response Parse Error: ' + e.message);
-    console.error('Original AI Response: ' + resultText);
-    throw new Error('AIからの応答解析に失敗しました。');
-  }
+  const itemsById = allItems.reduce((map, item) => (map[item.ID] = item, map), {});
+  const favoriteCoords = _getCoordinates(itemsById).filter(c => c.rating >= 4).slice(-10)
+    .map(c => c.items.map(i => i['名前']).join(' と '));
+  return {
+    allItems, itemsById,
+    favoriteCoordsPrompt: favoriteCoords.length > 0 ? '# 私のお気に入りコーデ\n' + favoriteCoords.map(c => `- ${c}`).join('\n') + '\n' : '',
+    wardrobeForPrompt: allItems.map(item => `ID: ${item.ID}, Name: ${item['名前']}, Category: ${item['種類']}, Color: ${item['色']}, Season: ${item['着用シーズン'] || '未設定'}, Formality: ${item['フォーマル度'] || '未設定'}`).join('\n')
+  };
 }
