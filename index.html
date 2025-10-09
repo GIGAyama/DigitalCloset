@@ -24,11 +24,11 @@
     <header class="header">
       <h1>Digital Closet</h1>
       <div class="header-actions">
-        <button class="btn btn-warning" onclick="openAiConsultModal()">AIに相談する</button>
-        <button class="btn btn-danger" onclick="openStyleModal()">AIスタイリスト</button>
-        <button class="btn btn-info" onclick="openCoordModal()">コーデ作成</button>
+        <button class="btn btn-warning" onclick="openAiConsultModal()"><i class="fas fa-comments d-md-none"></i><span class="d-none d-md-inline">AIに相談</span></button>
+        <button class="btn btn-danger" onclick="openStyleModal()"><i class="fas fa-magic d-md-none"></i><span class="d-none d-md-inline">AIスタイリスト</span></button>
+        <button class="btn btn-info" onclick="openCoordModal()"><i class="fas fa-tshirt d-md-none"></i><span class="d-none d-md-inline">コーデ作成</span></button>
         <div class="btn-group">
-          <button class="btn btn-primary" onclick="openItemModal()">＋ 新規アイテム登録</button>
+          <button class="btn btn-primary" onclick="openItemModal()"><i class="fas fa-plus d-md-none"></i><span class="d-none d-md-inline">＋ 新規アイテム</span></button>
           <button class="btn btn-primary dropdown-toggle dropdown-toggle-split" data-toggle="dropdown"></button>
           <div class="dropdown-menu dropdown-menu-right">
             <a class="dropdown-item" href="#" onclick="openAiRegisterModal(event)">AIで下書きを作成</a>
@@ -37,7 +37,7 @@
       </div>
     </header>
 
-    <ul class="nav nav-tabs" id="myTab" role="tablist">
+    <ul class="nav nav-tabs nav-fill" id="myTab" role="tablist">
       <li class="nav-item"><a class="nav-link active" id="closet-tab" data-toggle="tab" href="#closet" role="tab">Closet</a></li>
       <li class="nav-item"><a class="nav-link" id="disposed-tab" data-toggle="tab" href="#disposed" role="tab">廃棄済み</a></li>
       <li class="nav-item"><a class="nav-link" id="dashboard-tab" data-toggle="tab" href="#dashboard" role="tab">Dashboard</a></li>
@@ -48,10 +48,10 @@
         <div class="controls mt-4 mb-4">
           <div class="form-row align-items-center">
             <div class="form-group col-12"><input type="text" id="searchInput" class="form-control" placeholder="キーワード検索..."></div>
-            <div class="form-group col-6"><select id="categoryFilter" class="form-control"></select></div>
-            <div class="form-group col-6"><select id="colorFilter" class="form-control"></select></div>
-            <div class="form-group col-6"><select id="seasonFilter" class="form-control"><option value="">シーズン</option><option value="春">春</option><option value="夏">夏</option><option value="秋">秋</option><option value="冬">冬</option></select></div>
-            <div class="form-group col-6"><select id="sortOrder" class="form-control"></select></div>
+            <div class="form-group col-6 col-md-3"><select id="categoryFilter" class="form-control"></select></div>
+            <div class="form-group col-6 col-md-3"><select id="colorFilter" class="form-control"></select></div>
+            <div class="form-group col-6 col-md-3"><select id="seasonFilter" class="form-control"><option value="">シーズン</option><option value="春">春</option><option value="夏">夏</option><option value="秋">秋</option><option value="冬">冬</option></select></div>
+            <div class="form-group col-6 col-md-3"><select id="sortOrder" class="form-control"></select></div>
           </div>
            <div class="d-flex justify-content-between align-items-center mt-3 px-2">
                <div class="btn-group btn-group-toggle" data-toggle="buttons">
@@ -74,6 +74,20 @@
         <div class="dashboard-grid mt-4">
             <div class="chart-container" id="statsSummary" style="grid-column: 1 / -1;"></div>
             <div class="chart-container"><h5>着用回数 Top 10</h5><ul id="wearRank" class="rank-list"></ul></div>
+            
+            <!-- ★新機能: ご無沙汰アイテムコーナー -->
+            <div class="chart-container">
+              <div class="d-flex justify-content-between align-items-center mb-2">
+                <h5>ご無沙汰アイテム Top 5</h5>
+                <select id="neglectedSortOrder" class="form-control form-control-sm" style="width: auto;">
+                  <option value="last_worn">ご無沙汰順</option>
+                  <option value="wear_count">着用回数少ない順</option>
+                </select>
+              </div>
+              <ul id="neglectedItemsList" class="rank-list"></ul>
+            </div>
+            <!-- /★新機能 -->
+
             <div class="chart-container"><h5>ブランド別 投資額 Top 10</h5><ul id="brandRank" class="rank-list"></ul></div>
             <div class="chart-container"> <canvas id="categoryChart"></canvas> </div>
             <div class="chart-container"> <canvas id="colorChart"></canvas> </div>
