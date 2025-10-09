@@ -3,11 +3,15 @@
   //----------------------------------------------------------------
   // グローバル変数
   //----------------------------------------------------------------
-  let allItems = [], disposedItems = [], masterData = {}, charts = {}, selectedCoordItemIds = [], imageFiles = [];
+  let allItems = [], disposedItems = [], unwornItems = [], masterData = {}, charts = {}, selectedCoordItemIds = [], imageFiles = [];
   let itemToUpdateByAi = null;
   let dashboardDataCache = null;
   let editingCoordId = null; 
   let consultationImageFiles = [];
+  const calendarState = {
+    currentDate: new Date(),
+    wearLog: {}
+  };
   const G_DRIVE_THUMBNAIL_URL_PREFIX = "https://drive.google.com/thumbnail?id=";
   
   //----------------------------------------------------------------
@@ -44,24 +48,29 @@
   }
 
   function setupEventListeners() {
+    // Main Tab Events
     document.getElementById('searchInput').addEventListener('input', renderItems);
     ['categoryFilter', 'colorFilter', 'seasonFilter', 'sortOrder'].forEach(id => document.getElementById(id).addEventListener('change', renderItems));
     ['cardView', 'listView'].forEach(id => document.getElementById(id).parentNode.addEventListener('click', renderItems));
     $('a[data-toggle="tab"][href="#dashboard"]').on('shown.bs.tab', setupDashboard);
     $('a[data-toggle="tab"][href="#disposed"]').on('shown.bs.tab', loadDisposedItems);
-    
-    // AI登録モーダル
-    document.getElementById('itemImageInput').addEventListener('change', handleImageSelection);
-    
-    // アイテム登録モーダル内の画像アップロード用イベント
-    document.getElementById('imageUploadBtn').addEventListener('click', () => document.getElementById('imageUploadInput').click());
-    document.getElementById('imageUploadInput').addEventListener('change', handleImageUpload);
+    $('a[data-toggle="tab"][href="#calendar"]').on('shown.bs.tab', setupCalendar);
 
-    // AI相談室モーダル
-    document.getElementById('aiConsultImageInput').addEventListener('change', handleConsultImageSelection);
+    // Dashboard Events
+    document.getElementById('unwornSortOrder').addEventListener('change', () => renderUnwornItems(unwornItems));
     document.getElementById('coordFilterItem').addEventListener('change', () => {
       if (dashboardDataCache) renderSavedCoords(dashboardDataCache.coordinates);
     });
+
+    // Calendar Events
+    document.getElementById('prev-month-btn').addEventListener('click', () => changeMonth(-1));
+    document.getElementById('next-month-btn').addEventListener('click', () => changeMonth(1));
+
+    // Modal Events
+    document.getElementById('itemImageInput').addEventListener('change', handleImageSelection);
+    document.getElementById('imageUploadBtn').addEventListener('click', () => document.getElementById('imageUploadInput').click());
+    document.getElementById('imageUploadInput').addEventListener('change', handleImageUpload);
+    document.getElementById('aiConsultImageInput').addEventListener('change', handleConsultImageSelection);
     document.getElementById('aiConsultInput').addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
@@ -85,6 +94,11 @@
       if (targetItem) {
         selectBaseItem(targetItem, targetItem.dataset.id);
       }
+    });
+
+     document.getElementById('calendar-grid').addEventListener('click', e => {
+        const dayCell = e.target.closest('.calendar-day:not(.not-current-month):not(.no-items)');
+        if (dayCell) openCalendarDayModal(dayCell.dataset.date);
     });
   }
   
@@ -209,7 +223,7 @@
 
   function createItemCard(item) {
     const imageUrl = getImageUrl(item, 400);
-    return `<div class="col-12 col-sm-6 col-md-4 col-lg-3 mb-4">
+    return `<div class="col-6 col-md-4 col-lg-3 mb-4">
               <div class="item-card">
                 <img loading="lazy" src="${imageUrl}" alt="${item['名前']}" onerror="this.src='${getImageUrl(null, 400)}'" onclick="openItemDetailModal('${item.ID}')">
                 <div class="item-card-body">
@@ -233,11 +247,9 @@
     const rows = items.map(item => {
       const imageUrl = getImageUrl(item, 100);
       return `<tr>
-        <td>${item.ID}</td>
         <td><img loading="lazy" src="${imageUrl}" class="item-thumb" alt="${item['名前']}" onclick="openItemDetailModal('${item.ID}')" style="cursor: pointer;"></td>
         <td>${item['名前'] || ""}</td>
         <td>${item['ブランド'] || ""}</td>
-        <td>${item['種類'] || ""}</td>
         <td>¥${item['価格'].toLocaleString()}</td>
         <td>
           <div class="btn-group">
@@ -249,7 +261,7 @@
       </tr>`
     }).join("");
     return `<div class="table-responsive-sm"><table class="table table-hover bg-white rounded shadow-sm">
-              <thead class="thead-light"><tr><th>ID</th><th></th><th>名前</th><th>ブランド</th><th>種類</th><th>価格</th><th>操作</th></tr></thead>
+              <thead class="thead-light"><tr><th></th><th>名前</th><th>ブランド</th><th>価格</th><th>操作</th></tr></thead>
               <tbody>${rows}</tbody>
             </table></div>`;
   }
@@ -257,7 +269,6 @@
   function createDisposedItemTable(items) {
     const rows = items.map(item =>
       `<tr>
-        <td>${item.ID}</td>
         <td>${item['名前'] || ""}</td>
         <td>${item['ブランド'] || ""}</td>
         <td>${item['種類'] || ""}</td>
@@ -271,7 +282,7 @@
       </tr>`
     ).join("");
     return `<table class="table table-hover bg-white rounded shadow-sm">
-              <thead class="thead-light"><tr><th>ID</th><th>名前</th><th>ブランド</th><th>種類</th><th>廃棄年</th><th>操作</th></tr></thead>
+              <thead class="thead-light"><tr><th>名前</th><th>ブランド</th><th>種類</th><th>廃棄年</th><th>操作</th></tr></thead>
               <tbody>${rows}</tbody>
             </table>`;
   }
@@ -816,15 +827,21 @@
   async function setupDashboard() {
       showLoading(true);
       try {
-          const data = await callServerFunction('getDashboardData');
-          renderDashboard(data);
+          const [dashboardData, unwornData] = await Promise.all([
+              callServerFunction('getDashboardData'),
+              callServerFunction('getUnwornItems')
+          ]);
+          dashboardDataCache = dashboardData;
+          unwornItems = unwornData;
+          renderDashboard(dashboardData);
+          renderUnwornItems(unwornData);
       } catch(error) {
           onFailure(error);
       } finally {
           showLoading(false);
       }
   }
-
+  
   function renderStatsSummary(stats) {
       const container = document.getElementById('statsSummary');
       container.innerHTML = `
@@ -858,6 +875,7 @@
       const data = await callServerFunction('getItemDetails', itemId);
       const contentDiv = document.getElementById('itemDetailContent');
       contentDiv.innerHTML = buildItemDetailHtml(data);
+      $('#itemDetailTabs a:first').tab('show');
       $('#itemDetailModal').modal('show');
     } catch (error) {
       onFailure(error);
@@ -867,35 +885,58 @@
   }
 
   function buildItemDetailHtml(data) {
-    const { item, coordinates } = data;
-    const imageUrl = getImageUrl(item, 400);
+    const { item, coordinates, wearData } = data;
+    const costPerWear = wearData.total > 0 ? (item['価格'] / wearData.total).toFixed(0) : 'N/A';
 
     const headerHtml = `
       <div id="itemDetailHeader">
-        <img loading="lazy" src="${imageUrl}" alt="${item['名前']}" onerror="this.src='${getImageUrl(null, 400)}'">
+        <img loading="lazy" src="${getImageUrl(item, 400)}" alt="${item['名前']}" onerror="this.src='${getImageUrl(null, 400)}'">
         <div>
           <h3>${item['名前']}</h3>
-          <dl id="itemDetailInfo">
-            <dt>ブランド</dt><dd>${item['ブランド'] || '-'}</dd>
-            <dt>種類</dt><dd>${item['種類'] || '-'}</dd>
-            <dt>色</dt><dd>${item['色'] || '-'}</dd>
-            <dt>価格</dt><dd>¥${(item['価格'] || 0).toLocaleString()}</dd>
-            <dt>購入年</dt><dd>${item['購入年'] || '-'}</dd>
-            <dt>シーズン</dt><dd>${item['着用シーズン'] || '-'}</dd>
-          </dl>
+          <div class="row">
+            <div class="col-lg-6">
+              <dl id="itemDetailInfo">
+                <dt>ブランド</dt><dd>${item['ブランド'] || '-'}</dd>
+                <dt>種類</dt><dd>${item['種類'] || '-'}</dd>
+                <dt>色</dt><dd>${item['色'] || '-'}</dd>
+                <dt>シーズン</dt><dd>${item['着用シーズン'] || '-'}</dd>
+              </dl>
+            </div>
+            <div class="col-lg-6">
+              <dl id="itemDetailStats">
+                <dt>価格</dt><dd>¥${(item['価格'] || 0).toLocaleString()}</dd>
+                <dt>購入年</dt><dd>${item['購入年'] || '-'}</dd>
+                <dt>着用回数</dt><dd>${wearData.total} 回</dd>
+                <dt>着用単価</dt><dd class="cost-per-wear">¥${costPerWear.toLocaleString()}</dd>
+              </dl>
+            </div>
+          </div>
         </div>
-      </div>
-    `;
+      </div>`;
 
-    const coordsHtml = `
-      <div id="itemDetailCoords">
-        <h5>このアイテムを使ったコーデ</h5>
-        <ul class="rank-list">
-          ${coordinates.length > 0 ? coordinates.map(coord => renderCoordItem(coord, item.ID)).join('') : '<li class="text-muted">関連するコーデはありません。</li>'}
-        </ul>
-      </div>
-    `;
-    return headerHtml + coordsHtml;
+    const tabsHtml = `
+      <ul class="nav nav-tabs" id="itemDetailTabs" role="tablist">
+        <li class="nav-item"><a class="nav-link" data-toggle="tab" href="#detail-coords" role="tab">関連コーデ</a></li>
+        <li class="nav-item"><a class="nav-link" data-toggle="tab" href="#detail-history" role="tab">着用履歴</a></li>
+      </ul>
+      <div class="tab-content pt-3">
+        <div class="tab-pane fade" id="detail-coords" role="tabpanel">
+          <ul class="rank-list">
+            ${coordinates.length > 0 ? coordinates.map(coord => renderCoordItem(coord, item.ID)).join('') : '<li class="text-muted">関連するコーデはありません。</li>'}
+          </ul>
+        </div>
+        <div class="tab-pane fade" id="detail-history" role="tabpanel">
+          <h6>年度別 着用回数</h6>
+          <ul class="list-group list-group-flush mb-3">
+            ${Object.entries(wearData.byYear).sort((a,b) => b[0].localeCompare(a[0])).map(([year, count]) => `<li class="list-group-item d-flex justify-content-between align-items-center">${year}年 <span class="badge badge-primary badge-pill">${count}回</span></li>`).join('') || '<li class="list-group-item">履歴がありません。</li>'}
+          </ul>
+          <h6>最新の着用履歴</h6>
+          <ul class="list-group list-group-flush">
+            ${wearData.history.map(h => `<li class="list-group-item">${new Date(h).toLocaleDateString()}</li>`).join('') || '<li class="list-group-item">履歴がありません。</li>'}
+          </ul>
+        </div>
+      </div>`;
+    return headerHtml + tabsHtml;
   }
 
   function renderCoordItem(coord, mainItemId) {
@@ -1024,6 +1065,36 @@
       }).join("");
   }
 
+  function renderUnwornItems(data) {
+    const list = document.getElementById('unwornRank');
+    if (!data || data.length === 0) {
+        list.innerHTML = "<li>すべてのアイテムが着用されています。</li>";
+        return;
+    }
+    const sortOrder = document.getElementById('unwornSortOrder').value;
+
+    const sortedData = [...data].sort((a, b) => {
+        if (sortOrder === 'wear_count_asc') {
+            return (a.wearCount || 0) - (b.wearCount || 0) || new Date(a.lastWear || 0) - new Date(b.lastWear || 0);
+        } else { // last_wear_asc
+            const dateA = a.lastWear ? new Date(a.lastWear) : new Date(0);
+            const dateB = b.lastWear ? new Date(b.lastWear) : new Date(0);
+            return dateA - dateB;
+        }
+    }).slice(0, 5);
+
+    list.innerHTML = sortedData.map(d => {
+        const subText = sortOrder === 'wear_count_asc' ? `${d.wearCount || 0}回着用` : (d.lastWear ? `${new Date(d.lastWear).toLocaleDateString()}以来` : '着用記録なし');
+        return `<li class="rank-item" onclick="openItemDetailModal('${d.item.ID}')" style="cursor:pointer;">
+            <img loading="lazy" src="${getImageUrl(d.item, 100)}" alt="${d.item['名前']}">
+            <div class="rank-item-info">
+                <div class="name">${d.item['名前']}</div>
+                <div class="sub-text">${subText}</div>
+            </div>
+        </li>`;
+    }).join('');
+  }
+
   function renderBrandRank(data) {
       const list = document.getElementById('brandRank');
       const sortedBrands = Object.entries(data).sort(([, a], [, b]) => b.amount - a.amount).slice(0, 10);
@@ -1084,7 +1155,7 @@
   }
 
   async function handleDeleteCoordinate(coordId) {
-    const isConfirmed = await showConfirmationDialog({ // ★改善: ヘルパー関数を使用
+    const isConfirmed = await showConfirmationDialog({
         text: "このコーデを削除しますか？",
         confirmButtonText: 'はい、削除します'
     });
@@ -1103,7 +1174,7 @@
   }
 
   async function handleLogCoordinateWear(itemIds) {
-    const isConfirmed = await showConfirmationDialog({ // ★改善: ヘルパー関数を使用
+    const isConfirmed = await showConfirmationDialog({
       text: `${itemIds.length}点のアイテムをまとめて着用記録しますか？`,
       icon: 'question',
       confirmButtonColor: '#28a745',
@@ -1123,60 +1194,147 @@
   }
   
   //----------------------------------------------------------------
+  // Calendar
+  //----------------------------------------------------------------
+  async function setupCalendar() {
+      showLoading(true);
+      const year = calendarState.currentDate.getFullYear();
+      const month = calendarState.currentDate.getMonth() + 1;
+      document.getElementById('month-year-display').textContent = `${year}年 ${month}月`;
+      try {
+          calendarState.wearLog = await callServerFunction('getWearLogData', { year, month });
+          renderCalendar();
+      } catch (e) {
+          onFailure(e);
+      } finally {
+          showLoading(false);
+      }
+  }
+
+  function renderCalendar() {
+      const grid = document.getElementById('calendar-grid');
+      grid.innerHTML = '';
+      const { currentDate, wearLog } = calendarState;
+      const year = currentDate.getFullYear();
+      const month = currentDate.getMonth();
+
+      ['日', '月', '火', '水', '木', '金', '土'].forEach(day => {
+          grid.innerHTML += `<div class="calendar-day-header">${day}</div>`;
+      });
+      
+      const firstDay = new Date(year, month, 1).getDay();
+      const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+      for (let i = 0; i < firstDay; i++) grid.innerHTML += '<div></div>';
+
+      for (let day = 1; day <= daysInMonth; day++) {
+          const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+          const logsForDay = wearLog[dateStr] || [];
+          let dayHtml = `<div class="calendar-day ${logsForDay.length === 0 ? 'no-items' : ''}" data-date="${dateStr}">
+                          <div class="day-number">${day}</div>`;
+          if (logsForDay.length > 0) {
+              dayHtml += `<div class="day-items">
+                  ${logsForDay.slice(0, 4).map(log => `<img src="${getImageUrl(log.item, 50)}" title="${log.item['名前']}">`).join('')}
+              </div>`;
+          }
+          dayHtml += `</div>`;
+          grid.innerHTML += dayHtml;
+      }
+  }
+  
+  function changeMonth(delta) {
+      calendarState.currentDate.setMonth(calendarState.currentDate.getMonth() + delta);
+      setupCalendar();
+  }
+  
+  async function openCalendarDayModal(dateStr) {
+      const logs = calendarState.wearLog[dateStr] || [];
+      const title = new Date(dateStr + 'T00:00:00').toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' });
+      document.getElementById('calendarDayModalTitle').textContent = title;
+      
+      const body = document.getElementById('calendarDayModalBody');
+      body.innerHTML = logs.length > 0 ? `<div class="items">
+          ${logs.map(log => `
+              <div class="item-wrapper">
+                  <img src="${getImageUrl(log.item, 200)}" alt="${log.item['名前']}">
+                  <p class="mb-0 small">${log.item['名前']}</p>
+                  <a href="#" class="remove-wear" data-log-id="${log.logId}" data-date="${dateStr}">着用を取り消す</a>
+              </div>`).join('')}
+      </div>` : '<p>着用記録はありません。</p>';
+      
+      body.querySelectorAll('.remove-wear').forEach(btn => btn.addEventListener('click', handleDeleteWearLog));
+
+      const saveBtn = document.getElementById('saveCoordFromCalendarBtn');
+      const itemIds = logs.map(l => l.item.ID);
+      saveBtn.style.display = itemIds.length > 1 ? 'block' : 'none';
+      saveBtn.onclick = () => {
+          $('#calendarDayModal').modal('hide');
+          openCoordModal(itemIds);
+      };
+      
+      $('#calendarDayModal').modal('show');
+  }
+
+  async function handleDeleteWearLog(e) {
+      e.preventDefault();
+      const { logId, date } = e.target.dataset;
+      if (await showConfirmationDialog({ text: "この着用記録を取り消しますか？", icon: 'warning' })) {
+          showLoading(true);
+          try {
+              await callServerFunction('deleteWearLog', logId);
+              Toast.fire({icon: 'success', title: '着用記録を取り消しました。'});
+              
+              calendarState.wearLog[date] = calendarState.wearLog[date].filter(log => log.logId != logId);
+              if (calendarState.wearLog[date].length === 0) delete calendarState.wearLog[date];
+              
+              renderCalendar();
+              if (calendarState.wearLog[date] && calendarState.wearLog[date].length > 0) {
+                openCalendarDayModal(date);
+              } else {
+                $('#calendarDayModal').modal('hide');
+              }
+              
+          } catch(err) {
+              onFailure(err);
+          } finally {
+              showLoading(false);
+          }
+      }
+  }
+
+
+  //----------------------------------------------------------------
   // グラフ描画
   //----------------------------------------------------------------
   function createChart(id, type, data, options) {
       if(charts[id]) charts[id].destroy();
-      charts[id] = new Chart(document.getElementById(id).getContext("2d"), { type, data, options });
+      const defaultOptions = { responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { font: { size: 12 } } } } };
+      charts[id] = new Chart(document.getElementById(id).getContext("2d"), { type, data, options: {...defaultOptions, ...options} });
   }
   
   function createCategoryChart(d) {
       createChart("categoryChart", "pie", {
           labels: Object.keys(d),
-          datasets: [{
-              data: Object.values(d),
-              backgroundColor: ["#007bff", "#6610f2", "#6f42c1", "#e83e8c", "#dc3545", "#fd7e14", "#ffc107", "#28a745", "#20c997", "#17a2b8", "#4A5568", "#343a40"]
-          }]
-      }, {
-          plugins: {
-              title: { display: true, text: "種類別アイテム比率", font: { size: 16 } },
-              legend: { position: "right" }
-          }
-      });
+          datasets: [{ data: Object.values(d), backgroundColor: ["#007bff", "#6610f2", "#6f42c1", "#e83e8c", "#dc3545", "#fd7e14", "#ffc107", "#28a745", "#20c997", "#17a2b8", "#4A5568", "#343a40"] }]
+      }, { plugins: { title: { display: true, text: "種類別アイテム比率", font: { size: 16 } }, legend: { position: "right" } } });
   }
 
   function createColorChart(data, colorMaster) {
       const labels = Object.keys(data);
-      const chartData = Object.values(data);
-      const backgroundColors = labels.map(label => {
-          const colorInfo = colorMaster.find(c => c.name === label);
-          return colorInfo && colorInfo.code ? colorInfo.code : '#cccccc';
-      });
+      const backgroundColors = labels.map(label => (colorMaster.find(c => c.name === label) || {}).code || '#cccccc');
       createChart("colorChart", "doughnut", {
           labels: labels,
-          datasets: [{ data: chartData, backgroundColor: backgroundColors, borderColor: "#ffffff" }]
-      }, {
-          plugins: {
-              title: { display: true, text: "色別アイテム比率", font: { size: 16 } },
-              legend: { position: "right" }
-          }
-      });
+          datasets: [{ data: Object.values(data), backgroundColor: backgroundColors, borderColor: "#ffffff" }]
+      }, { plugins: { title: { display: true, text: "色別アイテム比率", font: { size: 16 } }, legend: { position: "right" } } });
   }
 
   function createYearlyInvestmentChart(d) {
       const sortedYears = Object.keys(d).sort((a,b) => a - b);
       createChart("yearlyInvestmentChart", "bar", {
           labels: sortedYears,
-          datasets: [{
-              label: "年間投資額 (円)",
-              data: sortedYears.map(year => d[year]),
-              backgroundColor: "#4A5568",
-          }]
+          datasets: [{ label: "年間投資額 (円)", data: sortedYears.map(year => d[year]), backgroundColor: "#4A5568" }]
       }, {
-          plugins: {
-              title: { display: true, text: "購入年別 投資額推移", font: { size: 16 } },
-              legend: { display: false }
-          },
+          plugins: { title: { display: true, text: "購入年別 投資額推移", font: { size: 16 } }, legend: { display: false } },
           scales: { y: { ticks: { callback: i => `¥${i.toLocaleString()}` } } }
       });
   }
@@ -1188,52 +1346,43 @@
       console.error("An error occurred: ", error);
       Swal.fire({ icon: 'error', title: 'エラーが発生しました', text: error.message });
       showLoading(false);
-      const buttons = ['analyzeImagesBtn', 'saveItemBtn', 'saveCoordBtn', 'aiConsultSendBtn'];
-      const btnTexts = ['この画像で解析する', '保存する', 'このコーデを保存', '送信'];
-      buttons.forEach((id, index) => {
+      const buttons = { 'analyzeImagesBtn': 'この画像で解析する', 'saveItemBtn': '保存する', 'saveCoordBtn': 'このコーデを保存', 'aiConsultSendBtn': '送信' };
+      Object.entries(buttons).forEach(([id, text]) => {
           const btn = document.getElementById(id);
           if (btn && btn.disabled) {
               btn.disabled = false;
-              btn.innerHTML = btnTexts[index];
+              btn.innerHTML = text;
           }
       });
   }
 
-  function showLoading(show) {
-      document.getElementById('loading').style.display = show ? "flex" : "none";
-  }
-
-  const fileToB64 = (file) => new Promise((resolve, reject) => {
+  function showLoading(show) { document.getElementById('loading').style.display = show ? "flex" : "none"; }
+  
+  const fileToDataUrl = file => new Promise((resolve, reject) => {
       const reader = new FileReader();
-      reader.onloadend = () => {
-        const base64 = reader.result.split(',')[1];
-        const mimeType = reader.result.split(';')[0].split(':')[1];
-        resolve({ base64, mimeType });
-      };
+      reader.onloadend = () => resolve(reader.result);
       reader.onerror = reject;
       reader.readAsDataURL(file);
   });
-
-  // ★改善: 画像URL生成を共通化
+  
+  const fileToB64 = file => new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve({ base64: reader.result.split(',')[1], mimeType: file.type });
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+  });
+  
   function getImageUrl(item, size = 400) {
-    if (item && item['画像URL']) {
-      return `${G_DRIVE_THUMBNAIL_URL_PREFIX}${item['画像URL']}&sz=w${size}`;
-    }
+    if (item && item['画像URL']) return `${G_DRIVE_THUMBNAIL_URL_PREFIX}${item['画像URL']}&sz=w${size}`;
     return `https://placehold.co/${size}x${size}/eee/ccc?text=No+Image`;
   }
-
-  // ★改善: 確認ダイアログ表示を共通化
+  
   async function showConfirmationDialog(config) {
-    const defaultConfig = {
-      title: '確認',
-      icon: 'warning',
-      showCancelButton: true,
-      confirmButtonColor: 'var(--color-accent-danger)',
-      cancelButtonColor: '#6c757d',
-      cancelButtonText: 'キャンセル'
-    };
-    const finalConfig = { ...defaultConfig, ...config };
-    const result = await Swal.fire(finalConfig);
+    const result = await Swal.fire({
+      title: '確認', icon: 'warning', showCancelButton: true,
+      confirmButtonColor: 'var(--color-accent-danger)', cancelButtonColor: '#6c757d',
+      cancelButtonText: 'キャンセル', ...config
+    });
     return result.isConfirmed;
   }
 </script>
