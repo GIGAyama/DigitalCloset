@@ -1,5 +1,3 @@
-//★★初回設定★★
-//⚙️「プロジェクトの設定」から、スクリプトプロパティ-の設定を行う。画像を保存するフォルダIDを「DRIVE_FOLDER_ID」、Gemini APIキーを「GEMINI_API_KEY」
 /**
  * @fileoverview Digital Closet アプリケーションのサーバーサイドロジックを担当します。
  * Google Apps Scriptで記述されており、スプレッドシートとのデータ連携、
@@ -147,6 +145,59 @@ function getOptions() {
     return { error: '選択肢データの取得中にエラーが発生しました。' };
   }
 }
+
+/**
+ * ★新機能: カレンダー機能のデータを取得
+ * @param {object} payload - { year: number, month: number } を含むオブジェクト
+ * @returns {object} 日付をキーとし、着用アイテムの配列を値とするオブジェクト
+ */
+function getCalendarData(payload) {
+  try {
+    const { year, month } = payload;
+    if (!year || !month) {
+      throw new Error('Year and month must be provided.');
+    }
+    const startDate = new Date(year, month - 1, 1);
+    const endDate = new Date(year, month, 0, 23, 59, 59);
+    
+    const items = getItems();
+    if (items.error) throw new Error(items.error);
+    const itemsById = items.reduce((map, item) => { map[item.ID] = item; return map; }, {});
+
+    const wearLogLastRow = wearLogSheet.getLastRow();
+    if (wearLogLastRow < 2) return {};
+
+    const wearLogData = wearLogSheet.getRange(2, 1, wearLogLastRow - 1, 3).getValues();
+
+    const calendarData = {};
+
+    wearLogData.forEach(row => {
+      const logId = row[0];
+      const itemId = row[1];
+      const wearDate = new Date(row[2]);
+
+      if (wearDate >= startDate && wearDate <= endDate) {
+        const dateString = Utilities.formatDate(wearDate, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+        const item = itemsById[itemId];
+        if (item) {
+          if (!calendarData[dateString]) {
+            calendarData[dateString] = [];
+          }
+          calendarData[dateString].push({
+            logId: logId,
+            item: item
+          });
+        }
+      }
+    });
+
+    return calendarData;
+  } catch (e) {
+    console.error('getCalendarData Error: ' + e.stack);
+    return { error: 'カレンダーデータの取得中にエラーが発生しました: ' + e.message };
+  }
+}
+
 
 function getDashboardData() {
   try {
@@ -603,6 +654,26 @@ function logWear(itemId) {
     return { status: 'error', message: '着用記録に失敗しました。' };
   }
 }
+
+/**
+ * ★新機能: 着用ログを削除する
+ * @param {string} wearLogId 削除対象の着用ログID
+ * @returns {object} 処理結果
+ */
+function deleteWearLogEntry(wearLogId) {
+  try {
+    if (!wearLogId) throw new Error('着用ログIDが指定されていません。');
+    const range = wearLogSheet.getRange("A:A").createTextFinder(String(wearLogId)).findNext();
+    if (!range) { throw new Error('指定されたIDの着用記録が見つかりません。'); }
+
+    wearLogSheet.deleteRow(range.getRow());
+    return { status: 'success', message: '着用記録を削除しました。' };
+  } catch (e) {
+    console.error('deleteWearLogEntry Error: ' + e.stack);
+    return { status: 'error', message: '着用記録の削除に失敗しました: ' + e.message };
+  }
+}
+
 
 function saveCoordinate(payload) {
   const { itemIds, rating, reason, coordId } = payload;
