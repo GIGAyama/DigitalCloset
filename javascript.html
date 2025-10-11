@@ -308,13 +308,24 @@
     previewImg.src = '';
     document.getElementById('imageUploadInput').value = '';
 
-    const isNew = id === null && !prefillData;
+    // --- Bug Fix Start ---
+    const isNew = !id;
     let item = {};
+    
+    // 1. For editing, get the original item data as a base
     if (id) {
-        item = [...allItems, ...disposedItems].find(i => i.ID == id);
-        if (!item) { onFailure({message: '指定されたアイテムが見つかりません。'}); return; }
-    } else if (prefillData) {
-        item = prefillData;
+        const originalItem = [...allItems, ...disposedItems].find(i => i.ID == id);
+        if (!originalItem) { 
+          onFailure({message: '指定されたアイテムが見つかりません。'}); 
+          return; 
+        }
+        item = { ...originalItem }; // Use a copy of the original item
+    }
+
+    // 2. If there's prefill data (from AI), merge it into the base item object
+    if (prefillData) {
+        item = { ...item, ...prefillData };
+        // Convert category/color names returned by AI to IDs
         if (item['種類']) {
             const category = masterData.categories.find(c => c.name === item['種類']);
             if (category) item['種類番号'] = category.id;
@@ -324,6 +335,8 @@
             if (color) item['色番号'] = color.id;
         }
     }
+    // --- Bug Fix End ---
+
     document.getElementById('modalTitle').textContent = isNew ? '新規アイテム登録' : 'アイテムの編集';
     document.getElementById('itemId').value = item.ID || '';
     document.getElementById('itemName').value = item['名前'] || '';
@@ -1427,7 +1440,8 @@
 
   function getImageUrl(item, size = 400) {
     if (item && item['画像URL']) {
-      return `${G_DRIVE_THUMBNAIL_URL_PREFIX}${item['画像URL']}&sz=w${size}`;
+      // Bug Fix: Add a timestamp to prevent browser caching issues with Google Drive thumbnails
+      return `${G_DRIVE_THUMBNAIL_URL_PREFIX}${item['画像URL']}&sz=w${size}&t=${new Date().getTime()}`;
     }
     return `https://placehold.co/${size}x${size}/eee/ccc?text=No+Image`;
   }
