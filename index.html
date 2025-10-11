@@ -24,11 +24,23 @@
     <header class="header">
       <h1>Digital Closet</h1>
       <div class="header-actions">
-        <button class="btn btn-warning" onclick="openAiConsultModal()"><i class="fas fa-comments d-md-none"></i><span class="d-none d-md-inline">AIに相談</span></button>
-        <button class="btn btn-danger" onclick="openStyleModal()"><i class="fas fa-magic d-md-none"></i><span class="d-none d-md-inline">AIスタイリスト</span></button>
-        <button class="btn btn-info" onclick="openCoordModal()"><i class="fas fa-tshirt d-md-none"></i><span class="d-none d-md-inline">コーデ作成</span></button>
+        <button class="btn btn-warning" onclick="openAiConsultModal()">
+          <span class="d-none d-lg-inline">AIに相談</span>
+          <span class="d-lg-none">AI相談</span>
+        </button>
+        <button class="btn btn-danger" onclick="openStyleModal()">
+          <span class="d-none d-lg-inline">AIスタイリスト</span>
+          <span class="d-lg-none">AI提案</span>
+        </button>
+        <button class="btn btn-info" onclick="openCoordModal()">
+          <span class="d-none d-lg-inline">コーデ作成</span>
+          <span class="d-lg-none">コーデ</span>
+        </button>
         <div class="btn-group">
-          <button class="btn btn-primary" onclick="openItemModal()"><i class="fas fa-plus d-md-none"></i><span class="d-none d-md-inline">＋ 新規アイテム</span></button>
+          <button class="btn btn-primary" onclick="openItemModal()">
+            <span class="d-none d-lg-inline">＋ 新規アイテム</span>
+            <span class="d-lg-none">＋ 新規</span>
+          </button>
           <button class="btn btn-primary dropdown-toggle dropdown-toggle-split" data-toggle="dropdown"></button>
           <div class="dropdown-menu dropdown-menu-right">
             <a class="dropdown-item" href="#" onclick="openAiRegisterModal(event)">AIで下書きを作成</a>
@@ -39,6 +51,7 @@
 
     <ul class="nav nav-tabs nav-fill" id="myTab" role="tablist">
       <li class="nav-item"><a class="nav-link active" id="closet-tab" data-toggle="tab" href="#closet" role="tab">Closet</a></li>
+      <li class="nav-item"><a class="nav-link" id="calendar-tab" data-toggle="tab" href="#calendar" role="tab">Calendar</a></li>
       <li class="nav-item"><a class="nav-link" id="disposed-tab" data-toggle="tab" href="#disposed" role="tab">廃棄済み</a></li>
       <li class="nav-item"><a class="nav-link" id="dashboard-tab" data-toggle="tab" href="#dashboard" role="tab">Dashboard</a></li>
     </ul>
@@ -64,6 +77,20 @@
         <div id="itemsGrid" class="row"></div>
       </div>
       
+      <div class="tab-pane fade" id="calendar" role="tabpanel">
+        <div class="controls mt-4 mb-4 p-3">
+          <div id="calendar-header" class="d-flex justify-content-between align-items-center">
+            <button id="prev-month-btn" class="btn btn-outline-secondary">&lt;</button>
+            <h4 id="calendar-month-year" class="mb-0"></h4>
+            <button id="next-month-btn" class="btn btn-outline-secondary">&gt;</button>
+          </div>
+        </div>
+        <div id="calendar-grid-container" class="table-responsive-sm">
+          <div id="calendar-weekdays" class="calendar-grid"></div>
+          <div id="calendar-days" class="calendar-grid"></div>
+        </div>
+      </div>
+
       <div class="tab-pane fade" id="disposed" role="tabpanel">
         <div class="mt-4 table-responsive-sm">
           <div id="disposedItemsGrid"></div>
@@ -75,7 +102,6 @@
             <div class="chart-container" id="statsSummary" style="grid-column: 1 / -1;"></div>
             <div class="chart-container"><h5>着用回数 Top 10</h5><ul id="wearRank" class="rank-list"></ul></div>
             
-            <!-- ★新機能: ご無沙汰アイテムコーナー -->
             <div class="chart-container">
               <div class="d-flex justify-content-between align-items-center mb-2">
                 <h5>ご無沙汰アイテム Top 5</h5>
@@ -86,7 +112,6 @@
               </div>
               <ul id="neglectedItemsList" class="rank-list"></ul>
             </div>
-            <!-- /★新機能 -->
 
             <div class="chart-container"><h5>ブランド別 投資額 Top 10</h5><ul id="brandRank" class="rank-list"></ul></div>
             <div class="chart-container"> <canvas id="categoryChart"></canvas> </div>
@@ -159,13 +184,13 @@
         <div class="modal-body">
           <div class="row h-100">
             <div class="col-md-5 d-flex flex-column">
-              <h6>1. 基準にするアイテムを選んでください</h6>
+              <h6>1. AIへの要望（任意）</h6>
+              <textarea id="styleRequest" class="form-control mb-3" rows="2" placeholder="例：公園に行くのでカジュアルに、寒くないように、デートに着ていきたい 等"></textarea>
+              <h6 class="mt-2">2. 基準にするアイテムを選んでください</h6>
               <div id="style-base-item-list"></div>
             </div>
             <div class="col-md-7 d-flex flex-column">
-              <h6>2. AIへの要望（任意）</h6>
-              <textarea id="styleRequest" class="form-control mb-3" rows="2" placeholder="例：公園に行くのでカジュアルに、寒くないように、デートに着ていきたい 等"></textarea>
-              <h6 class="mt-2">3. AIからの提案</h6>
+              <h6 class="mt-2 mt-md-0">3. AIからの提案</h6>
               <div id="style-suggestion-list" class="flex-grow-1"><p class="text-muted">ここに提案アイテムが表示されます。</p></div>
             </div>
           </div>
@@ -216,6 +241,25 @@
     <div class="modal-body" id="itemDetailContent">
     </div>
   </div></div></div>
+
+  <div class="modal fade" id="calendarDetailModal" tabindex="-1">
+    <div class="modal-dialog modal-fullscreen modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="calendarDetailTitle"></h5>
+          <button type="button" class="close" data-dismiss="modal"><span>&times;</span></button>
+        </div>
+        <div class="modal-body">
+          <h6>この日に着たアイテム</h6>
+          <div id="calendarDetailItemList"></div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-dismiss="modal">閉じる</button>
+          <button type="button" class="btn btn-info" onclick="handleSaveCoordFromCalendar()">このコーデを保存</button>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <!-- External Scripts -->
   <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
