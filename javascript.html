@@ -8,6 +8,10 @@
   let dashboardDataCache = null;
   let editingCoordId = null; 
   let consultationImageFiles = [];
+  // ★新機能: カレンダー関連のグローバル変数
+  let currentCalendarDate = new Date();
+  let calendarDataCache = {};
+
   const G_DRIVE_THUMBNAIL_URL_PREFIX = "https://drive.google.com/thumbnail?id=";
   
   //----------------------------------------------------------------
@@ -50,6 +54,11 @@
     $('a[data-toggle="tab"][href="#dashboard"]').on('shown.bs.tab', setupDashboard);
     $('a[data-toggle="tab"][href="#disposed"]').on('shown.bs.tab', loadDisposedItems);
     
+    // ★新機能: カレンダータブのイベントリスナー
+    $('a[data-toggle="tab"][href="#calendar"]').on('shown.bs.tab', setupCalendar);
+    document.getElementById('prev-month-btn').addEventListener('click', () => changeMonth(-1));
+    document.getElementById('next-month-btn').addEventListener('click', () => changeMonth(1));
+
     document.getElementById('itemImageInput').addEventListener('change', handleImageSelection);
     
     document.getElementById('imageUploadBtn').addEventListener('click', () => document.getElementById('imageUploadInput').click());
@@ -474,26 +483,147 @@
       }
   }
 
-  async function handleLogWear(id) {
-      if (id) { 
-          showLoading(true);
-          try {
-              const result = await callServerFunction('logWear', id);
-              Toast.fire({ icon: 'success', title: result.message });
-          } catch (error) {
-              onFailure(error);
-          } finally {
-              showLoading(false);
-          }
-      } 
+  async function handleLogWear(id, fromCalendar = false) {
+    if (id) { 
+        showLoading(true);
+        try {
+            const result = await callServerFunction('logWear', id);
+            Toast.fire({ icon: 'success', title: result.message });
+            // カレンダーからの着用の場合はカレンダーをリフレッシュ
+            if (fromCalendar) {
+                await setupCalendar(); 
+            }
+        } catch (error) {
+            onFailure(error);
+        } finally {
+            showLoading(false);
+        }
+    } 
+  }
+  
+  //----------------------------------------------------------------
+  // ★新機能: カレンダー機能
+  //----------------------------------------------------------------
+  async function setupCalendar() {
+    showLoading(true);
+    try {
+      const year = currentCalendarDate.getFullYear();
+      const month = currentCalendarDate.getMonth() + 1;
+      const data = await callServerFunction('getCalendarData', { year, month });
+      calendarDataCache = data;
+      renderCalendar(year, month, data);
+    } catch(error) {
+      onFailure(error);
+    } finally {
+      showLoading(false);
+    }
+  }
+
+  function renderCalendar(year, month, data) {
+    document.getElementById('calendar-month-year').textContent = `${year}年 ${month}月`;
+    const weekdaysContainer = document.getElementById('calendar-weekdays');
+    const daysContainer = document.getElementById('calendar-days');
+    
+    // 曜日ヘッダーの描画
+    const weekdays = ['日', '月', '火', '水', '木', '金', '土'];
+    weekdaysContainer.innerHTML = weekdays.map(day => `<div class="calendar-weekday">${day}</div>`).join('');
+
+    daysContainer.innerHTML = '';
+    const firstDay = new Date(year, month - 1, 1).getDay();
+    const daysInMonth = new Date(year, month, 0).getDate();
+
+    // 1日より前の空白セルを追加
+    for (let i = 0; i < firstDay; i++) {
+      daysContainer.innerHTML += `<div class="calendar-day empty"></div>`;
+    }
+
+    // 日付セルを追加
+    for (let day = 1; day <= daysInMonth; day++) {
+      const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      const dayData = data[dateStr] || [];
+      const isToday = new Date().toDateString() === new Date(year, month - 1, day).toDateString();
+      
+      const thumbnailsHtml = dayData.slice(0, 4).map(d => {
+        const imageUrl = getImageUrl(d.item, 50);
+        return `<img loading="lazy" src="${imageUrl}" class="calendar-thumbnail" title="${d.item['名前']}">`;
+      }).join('');
+      
+      const dayCell = document.createElement('div');
+      dayCell.className = `calendar-day ${isToday ? 'today' : ''}`;
+      dayCell.innerHTML = `<div class="day-number">${day}</div><div class="thumbnails-container">${thumbnailsHtml}</div>`;
+      if(dayData.length > 0) {
+        dayCell.addEventListener('click', () => openCalendarDetailModal(dateStr, dayData));
+      }
+      daysContainer.appendChild(dayCell);
+    }
+  }
+  
+  function changeMonth(delta) {
+    currentCalendarDate.setMonth(currentCalendarDate.getMonth() + delta);
+    setupCalendar();
+  }
+
+  function openCalendarDetailModal(dateStr, items) {
+    document.getElementById('calendarDetailTitle').textContent = dateStr;
+    const itemListDiv = document.getElementById('calendarDetailItemList');
+    itemListDiv.innerHTML = items.map(d => {
+      const imageUrl = getImageUrl(d.item, 100);
+      return `
+        <div class="calendar-detail-item d-flex align-items-center mb-2">
+          <img src="${imageUrl}" class="item-thumb mr-3">
+          <div class="flex-grow-1">${d.item['名前']}</div>
+          <button class="btn btn-sm btn-outline-danger" onclick="handleDeleteWearLog('${d.logId}')">取消</button>
+        </div>`;
+    }).join('');
+    // コーデ保存ボタンにデータを埋め込む
+    const saveBtn = document.querySelector('#calendarDetailModal .btn-info');
+    saveBtn.dataset.itemIds = JSON.stringify(items.map(i => i.item.ID));
+    $('#calendarDetailModal').modal('show');
+  }
+
+  async function handleDeleteWearLog(logId) {
+    const isConfirmed = await showConfirmationDialog({
+      text: "この着用記録を取り消しますか？",
+      confirmButtonText: 'はい、取り消します'
+    });
+    if (isConfirmed) {
+      showLoading(true);
+      try {
+        await callServerFunction('deleteWearLogEntry', logId);
+        Toast.fire({ icon: 'success', title: '着用記録を取り消しました。' });
+        $('#calendarDetailModal').modal('hide');
+        await setupCalendar();
+      } catch(error) {
+        onFailure(error);
+      } finally {
+        showLoading(false);
+      }
+    }
+  }
+  
+  function handleSaveCoordFromCalendar() {
+    const saveBtn = document.querySelector('#calendarDetailModal .btn-info');
+    const itemIds = JSON.parse(saveBtn.dataset.itemIds || '[]');
+    if (itemIds.length > 0) {
+      $('#calendarDetailModal').modal('hide');
+      // 少し遅延させてモーダルが閉じてから開く
+      setTimeout(() => {
+        openCoordModal(itemIds);
+      }, 500);
+    } else {
+      Swal.fire('エラー', 'アイテムが見つかりません。', 'error');
+    }
   }
   
   //----------------------------------------------------------------
   // コーデ操作
   //----------------------------------------------------------------
   function openCoordModal(idsToSelect = []) {
-      if (idsToSelect.length === 0) {
-          editingCoordId = null;
+      editingCoordId = null; // 新規作成モードにリセット
+      if (Array.isArray(idsToSelect) && idsToSelect.length > 0) {
+          idsToSelect = idsToSelect.map(String); // 比較のために文字列に統一
+      } else {
+          idsToSelect = [];
       }
       
       document.querySelectorAll('#coord-item-list .coord-item').forEach(el => {
@@ -538,7 +668,9 @@
 
           if (result.status === 'success') {
               $('#coordModal').modal('hide');
-              await setupDashboard();
+              if (dashboardDataCache) { // ダッシュボードが表示されていれば更新
+                await setupDashboard();
+              }
           }
       } catch (error) {
           onFailure(error);
@@ -612,7 +744,7 @@
           if (result.status === 'success') {
               container.querySelector('button').style.display = 'none';
               container.querySelector('.rating-stars').innerHTML = '<span class="text-success">評価を保存しました！</span>';
-              await setupDashboard();
+              if(dashboardDataCache) await setupDashboard();
           }
       } catch(error) {
            onFailure(error);
@@ -822,9 +954,9 @@
   async function setupDashboard() {
       showLoading(true);
       try {
-          const data = await callServerFunction('getDashboardData');
-          renderDashboard(data);
-          loadNeglectedItems(); // ★新機能: ご無沙汰アイテムを初期表示
+          dashboardDataCache = await callServerFunction('getDashboardData');
+          renderDashboard(dashboardDataCache);
+          await loadNeglectedItems(); // ★新機能: ご無沙汰アイテムを初期表示
       } catch(error) {
           onFailure(error);
       } finally {
@@ -846,7 +978,6 @@
   }
 
   function renderDashboard(data) {
-      dashboardDataCache = data;
       Object.values(charts).forEach(c => c.destroy());
       charts = {};
       renderStatsSummary(data.stats);
@@ -1008,7 +1139,7 @@
         try {
             const res = await callServerFunction('deleteCoordinate', coordId);
             Toast.fire({ icon: 'success', title: res.message });
-            await setupDashboard();
+            if (dashboardDataCache) await setupDashboard();
             await openItemDetailModal(itemId);
         } catch(error) {
             onFailure(error);
@@ -1190,6 +1321,10 @@
         try {
             const res = await callServerFunction('logCoordinateWear', itemIds);
             Toast.fire({ icon: 'success', title: res.message });
+            // カレンダーが表示されていたら更新
+            if ($('#calendar-tab').hasClass('active')) {
+                await setupCalendar();
+            }
         } catch(error) {
             onFailure(error);
         } finally {
