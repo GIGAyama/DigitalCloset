@@ -67,20 +67,28 @@ function uploadImage(payload) {
       const extension = fileName.includes('.') ? fileName.split('.').pop() : 'jpg';
       const newFileName = `${targetItemId}.${extension}`;
 
-      let file;
-      const existingFiles = folder.getFilesByName(newFileName);
-      if (existingFiles.hasNext()) {
-        file = existingFiles.next();
-        file.setContent(blob.getBytes());
-      } else {
-        file = folder.createFile(blob).setName(newFileName);
+      // --- Bug Fix: Robustly handle image updates ---
+      // 1. Search for any and all existing files for this item ID and move them to trash.
+      // This prevents orphaned files if the file extension changes (e.g., .jpg -> .png).
+      const existingFilesIterator = folder.getFiles();
+      while(existingFilesIterator.hasNext()){
+          const existingFile = existingFilesIterator.next();
+          // We check if the filename starts with "ID." to catch files like "123.jpg", "123.png" etc.
+          if (existingFile.getName().startsWith(targetItemId + '.')) {
+              existingFile.setTrashed(true);
+          }
       }
+
+      // 2. Create the new file with the correct name.
+      const file = folder.createFile(blob).setName(newFileName);
+      // --- End of Bug Fix ---
       
       const result = { fileId: file.getId() };
       if (isNewItem) {
         result.newItemId = targetItemId;
       }
       return result;
+
     } else if (isNewItem) {
       return { newItemId: targetItemId, fileId: '' };
     } else {
