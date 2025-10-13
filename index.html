@@ -104,7 +104,7 @@
             
             <div class="chart-container">
               <div class="d-flex justify-content-between align-items-center mb-2">
-                <h5>ご無沙汰アイテム Top 5</h5>
+                <h5>ご無沙汰アイテム Top 10</h5>
                 <select id="neglectedSortOrder" class="form-control form-control-sm" style="width: auto;">
                   <option value="last_worn">ご無沙汰順</option>
                   <option value="wear_count">着用回数少ない順</option>
@@ -253,9 +253,12 @@
           <h6>この日に着たアイテム</h6>
           <div id="calendarDetailItemList"></div>
         </div>
-        <div class="modal-footer">
-          <button type="button" class="btn btn-secondary" data-dismiss="modal">閉じる</button>
-          <button type="button" class="btn btn-info" onclick="handleSaveCoordFromCalendar()">このコーデを保存</button>
+        <div class="modal-footer justify-content-between">
+          <button type="button" class="btn btn-primary" id="addItemToDateBtn">+ この日にアイテムを追加</button>
+          <div>
+            <button type="button" class="btn btn-secondary" data-dismiss="modal">閉じる</button>
+            <button type="button" class="btn btn-info" id="saveCoordFromCalendarBtn" onclick="handleSaveCoordFromCalendar()">このコーデを保存</button>
+          </div>
         </div>
       </div>
     </div>
