@@ -496,14 +496,13 @@
       }
   }
 
-  async function handleLogWear(id, fromCalendar = false) {
+  async function handleLogWear(id) {
     if (id) { 
         showLoading(true);
         try {
             const result = await callServerFunction('logWear', id);
             Toast.fire({ icon: 'success', title: result.message });
-            // カレンダーからの着用の場合はカレンダーをリフレッシュ
-            if (fromCalendar) {
+            if ($('#calendar-tab').hasClass('active')) {
                 await setupCalendar(); 
             }
         } catch (error) {
@@ -515,7 +514,7 @@
   }
   
   //----------------------------------------------------------------
-  // ★新機能: カレンダー機能
+  // ★機能改善: カレンダー機能
   //----------------------------------------------------------------
   async function setupCalendar() {
     showLoading(true);
@@ -537,7 +536,6 @@
     const weekdaysContainer = document.getElementById('calendar-weekdays');
     const daysContainer = document.getElementById('calendar-days');
     
-    // 曜日ヘッダーの描画
     const weekdays = ['日', '月', '火', '水', '木', '金', '土'];
     weekdaysContainer.innerHTML = weekdays.map(day => `<div class="calendar-weekday">${day}</div>`).join('');
 
@@ -545,12 +543,10 @@
     const firstDay = new Date(year, month - 1, 1).getDay();
     const daysInMonth = new Date(year, month, 0).getDate();
 
-    // 1日より前の空白セルを追加
     for (let i = 0; i < firstDay; i++) {
       daysContainer.innerHTML += `<div class="calendar-day empty"></div>`;
     }
 
-    // 日付セルを追加
     for (let day = 1; day <= daysInMonth; day++) {
       const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
       const dayData = data[dateStr] || [];
@@ -564,9 +560,7 @@
       const dayCell = document.createElement('div');
       dayCell.className = `calendar-day ${isToday ? 'today' : ''}`;
       dayCell.innerHTML = `<div class="day-number">${day}</div><div class="thumbnails-container">${thumbnailsHtml}</div>`;
-      if(dayData.length > 0) {
-        dayCell.addEventListener('click', () => openCalendarDetailModal(dateStr, dayData));
-      }
+      dayCell.addEventListener('click', () => openCalendarDetailModal(dateStr, dayData));
       daysContainer.appendChild(dayCell);
     }
   }
@@ -579,19 +573,94 @@
   function openCalendarDetailModal(dateStr, items) {
     document.getElementById('calendarDetailTitle').textContent = dateStr;
     const itemListDiv = document.getElementById('calendarDetailItemList');
-    itemListDiv.innerHTML = items.map(d => {
-      const imageUrl = getImageUrl(d.item, 100);
-      return `
-        <div class="calendar-detail-item d-flex align-items-center mb-2">
-          <img src="${imageUrl}" class="item-thumb mr-3">
-          <div class="flex-grow-1">${d.item['名前']}</div>
-          <button class="btn btn-sm btn-outline-danger" onclick="handleDeleteWearLog('${d.logId}')">取消</button>
-        </div>`;
-    }).join('');
-    // コーデ保存ボタンにデータを埋め込む
-    const saveBtn = document.querySelector('#calendarDetailModal .btn-info');
-    saveBtn.dataset.itemIds = JSON.stringify(items.map(i => i.item.ID));
+    
+    if (items.length > 0) {
+      itemListDiv.innerHTML = items.map(d => {
+        const imageUrl = getImageUrl(d.item, 100);
+        return `
+          <div class="calendar-detail-item d-flex align-items-center mb-2">
+            <img src="${imageUrl}" class="item-thumb mr-3">
+            <div class="flex-grow-1">${d.item['名前']}</div>
+            <button class="btn btn-sm btn-outline-danger" onclick="handleDeleteWearLog('${d.logId}')">取消</button>
+          </div>`;
+      }).join('');
+    } else {
+      itemListDiv.innerHTML = '<p class="text-muted">この日に着用したアイテムはありません。</p>';
+    }
+
+    const saveCoordBtn = document.getElementById('saveCoordFromCalendarBtn');
+    if (items.length > 0) {
+      saveCoordBtn.style.display = 'inline-block';
+      saveCoordBtn.dataset.itemIds = JSON.stringify(items.map(i => i.item.ID));
+    } else {
+      saveCoordBtn.style.display = 'none';
+    }
+
+    const addItemBtn = document.getElementById('addItemToDateBtn');
+    addItemBtn.onclick = () => {
+        const existingItemIds = items.map(d => d.item.ID);
+        openItemSelectionForDate(dateStr, existingItemIds);
+    };
+
     $('#calendarDetailModal').modal('show');
+  }
+
+  /**
+   * ★新機能: 特定の日付に着るアイテムを選択するためのモーダルを開く
+   * @param {string} dateStr - 'YYYY-MM-DD' 形式の日付文字列
+   * @param {string[]} existingItemIds - その日に既に登録されているアイテムIDの配列
+   */
+  function openItemSelectionForDate(dateStr, existingItemIds) {
+    $('#calendarDetailModal').modal('hide');
+
+    const modal = $('#coordModal');
+    const title = modal.find('.modal-title');
+    const saveBtn = modal.find('#saveCoordBtn');
+    const originalTitle = 'コーディネート作成';
+    const originalBtnText = 'このコーデを保存';
+
+    title.text(`${dateStr} に着るアイテムを追加`);
+    saveBtn.text('着用を記録する');
+    saveBtn.off('click').on('click', () => handleLogSelectedItemsForDate(dateStr));
+    
+    openCoordModal(existingItemIds);
+
+    modal.off('hidden.bs.modal').on('hidden.bs.modal', () => {
+      title.text(originalTitle);
+      saveBtn.text(originalBtnText);
+      saveBtn.off('click').on('click', saveCoordinate);
+    });
+  }
+
+  /**
+   * ★新機能: 選択されたアイテムを指定された日付の着用ログとして保存する
+   * @param {string} dateStr - 'YYYY-MM-DD' 形式の日付文字列
+   */
+  async function handleLogSelectedItemsForDate(dateStr) {
+    if (selectedCoordItemIds.length === 0) {
+      Swal.fire('情報', 'アイテムが選択されていません。', 'info');
+      return;
+    }
+    
+    const btn = document.getElementById('saveCoordBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> 記録中...';
+    showLoading(true);
+
+    try {
+      const payload = { itemIds: selectedCoordItemIds, dateString: dateStr };
+      const result = await callServerFunction('addWearLogEntries', payload);
+      
+      Toast.fire({ icon: 'success', title: result.message });
+      $('#coordModal').modal('hide');
+      await setupCalendar();
+
+    } catch (error) {
+      onFailure(error);
+    } finally {
+      showLoading(false);
+      btn.disabled = false;
+    }
   }
 
   async function handleDeleteWearLog(logId) {
@@ -615,14 +684,11 @@
   }
   
   function handleSaveCoordFromCalendar() {
-    const saveBtn = document.querySelector('#calendarDetailModal .btn-info');
+    const saveBtn = document.getElementById('saveCoordFromCalendarBtn');
     const itemIds = JSON.parse(saveBtn.dataset.itemIds || '[]');
     if (itemIds.length > 0) {
       $('#calendarDetailModal').modal('hide');
-      // 少し遅延させてモーダルが閉じてから開く
-      setTimeout(() => {
-        openCoordModal(itemIds);
-      }, 500);
+      setTimeout(() => { openCoordModal(itemIds); }, 500);
     } else {
       Swal.fire('エラー', 'アイテムが見つかりません。', 'error');
     }
@@ -632,9 +698,9 @@
   // コーデ操作
   //----------------------------------------------------------------
   function openCoordModal(idsToSelect = []) {
-      editingCoordId = null; // 新規作成モードにリセット
+      editingCoordId = null; 
       if (Array.isArray(idsToSelect) && idsToSelect.length > 0) {
-          idsToSelect = idsToSelect.map(String); // 比較のために文字列に統一
+          idsToSelect = idsToSelect.map(String); 
       } else {
           idsToSelect = [];
       }
@@ -681,7 +747,7 @@
 
           if (result.status === 'success') {
               $('#coordModal').modal('hide');
-              if (dashboardDataCache) { // ダッシュボードが表示されていれば更新
+              if (dashboardDataCache) {
                 await setupDashboard();
               }
           }
