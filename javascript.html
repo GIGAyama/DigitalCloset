@@ -77,6 +77,9 @@
 
     // ★新機能: ご無沙汰アイテムのソート順変更イベント
     document.getElementById('neglectedSortOrder').addEventListener('change', loadNeglectedItems);
+    
+    // ★バグ修正: イベントリスナーの管理をjQueryに統一
+    $('#saveCoordBtn').on('click', saveCoordinate);
 
     setupEventDelegation();
   }
@@ -616,18 +619,19 @@
     const modal = $('#coordModal');
     const title = modal.find('.modal-title');
     const saveBtn = modal.find('#saveCoordBtn');
-    const originalTitle = 'コーディネート作成';
-    const originalBtnText = 'このコーデを保存';
 
     title.text(`${dateStr} に着るアイテムを追加`);
     saveBtn.text('着用を記録する');
+    
+    // ★バグ修正: 既存のクリックイベントを削除してから新しいイベントを設定
     saveBtn.off('click').on('click', () => handleLogSelectedItemsForDate(dateStr));
     
     openCoordModal(existingItemIds);
 
+    // ★バグ修正: モーダルが閉じた時に元の状態に戻す
     modal.off('hidden.bs.modal').on('hidden.bs.modal', () => {
-      title.text(originalTitle);
-      saveBtn.text(originalBtnText);
+      title.text('コーディネート作成');
+      saveBtn.text('このコーデを保存');
       saveBtn.off('click').on('click', saveCoordinate);
     });
   }
@@ -638,7 +642,8 @@
    */
   async function handleLogSelectedItemsForDate(dateStr) {
     if (selectedCoordItemIds.length === 0) {
-      Swal.fire('情報', 'アイテムが選択されていません。', 'info');
+      // ログを記録せず、モーダルを閉じるだけ
+      $('#coordModal').modal('hide');
       return;
     }
     
