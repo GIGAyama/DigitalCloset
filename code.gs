@@ -213,7 +213,10 @@ function getDashboardData() {
     if (items.error) throw new Error(items.error);
     const itemsById = items.reduce((map, item) => { map[item.ID] = item; return map; }, {});
     const { totalCost, categoryData, colorData, purchaseData, brandData } = _calculateStats(items);
-    const wearRank = _getWearRank(itemsById);
+    
+    // ★改善: _getWearRank 呼び出しを getWearRank に変更
+    const wearRank = getWearRank({ itemsById: itemsById }); 
+    
     const coordinates = _getCoordinates(itemsById);
     const colorMaster = getOptions().colors;
 
@@ -240,9 +243,8 @@ function getNeglectedItems(type) {
     if (items.error) throw new Error(items.error);
     
     const wearLogLastRow = wearLogSheet.getLastRow();
-    if (wearLogLastRow < 2) return [];
-
-    const wearLog = wearLogSheet.getRange(2, 2, wearLogLastRow - 1, 2).getValues();
+    // ログがなくてもアイテムリストは処理する（購入年でフィルタするため）
+    const wearLog = (wearLogLastRow < 2) ? [] : wearLogSheet.getRange(2, 2, wearLogLastRow - 1, 2).getValues();
     
     const wearStats = {};
     items.forEach(item => {
@@ -263,12 +265,33 @@ function getNeglectedItems(type) {
       }
     });
 
-    let sortedItems = Object.values(wearStats);
+    const today = new Date();
+    const currentYear = today.getFullYear();
+
+    let allStats = Object.values(wearStats);
+
+    // ★改善: 「今年購入して、まだ一度も着ていない」アイテムを除外
+    let filteredStats = allStats.filter(stat => {
+      if (stat.wearCount > 0) {
+        return true; // 一度でも着たアイテムは常に対象
+      }
+      
+      // 着用回数0回の場合
+      const purchaseYear = parseInt(stat.item['購入年'], 10);
+      
+      // 購入年が不明か、今年の場合は除外
+      if (!purchaseYear || purchaseYear === currentYear) {
+        return false;
+      }
+      
+      // 過去に購入して一度も着ていないアイテムは対象
+      return true;
+    });
 
     if (type === 'last_worn') {
-      sortedItems.sort((a, b) => a.lastWorn - b.lastWorn);
+      filteredStats.sort((a, b) => a.lastWorn - b.lastWorn);
     } else { // 'wear_count'
-      sortedItems.sort((a, b) => {
+      filteredStats.sort((a, b) => {
         if (a.wearCount !== b.wearCount) {
           return a.wearCount - b.wearCount;
         }
@@ -276,7 +299,7 @@ function getNeglectedItems(type) {
       });
     }
 
-    return sortedItems.slice(0, 10).map(stat => ({
+    return filteredStats.slice(0, 10).map(stat => ({
       item: stat.item,
       wearCount: stat.wearCount,
       lastWorn: stat.lastWorn > new Date(0) ? Utilities.formatDate(stat.lastWorn, Session.getScriptTimeZone(), 'yyyy/MM/dd') : '着用記録なし'
@@ -877,17 +900,66 @@ function _calculateStats(items) {
   return { totalCost, categoryData, colorData, purchaseData, brandData };
 }
 
-function _getWearRank(itemsById) {
-  const wearCount = {};
-  const wearLogLastRow = wearLogSheet.getLastRow();
-  if (wearLogLastRow < 2) return [];
-  const wearLogData = wearLogSheet.getRange(2, 2, wearLogLastRow - 1, 1).getDisplayValues().flat();
-  wearLogData.forEach(itemId => { if (itemId) { wearCount[itemId] = (wearCount[itemId] || 0) + 1; } });
-  return Object.entries(wearCount)
-    .sort(([, countA], [, countB]) => countB - countA)
-    .slice(0, 10)
-    .map(([itemId, count]) => ({ item: itemsById[itemId], count: count }))
-    .filter(entry => entry.item);
+/**
+ * ★改善: 着用回数ランキングをカテゴリ別に取得できるように変更
+ * @param {object} payload { categoryId?: string, itemsById?: object }
+ * @returns {Array} 着用回数ランキング
+ */
+function getWearRank(payload = {}) {
+  const { categoryId } = payload;
+  let { itemsById } = payload; // ダッシュボード全体読み込み時に渡される
+
+  try {
+    // itemsById が渡されなかった場合 (クライアントからの個別呼び出し)
+    if (!itemsById) {
+      const items = getItems();
+      if (items.error) throw new Error(items.error);
+      itemsById = items.reduce((map, item) => { map[item.ID] = item; return map; }, {});
+    }
+
+    // categoryId でフィルタリング対象のIDセットを作成
+    let targetItemIds = null;
+    if (categoryId) {
+      targetItemIds = new Set(
+        Object.values(itemsById)
+          .filter(item => item['種類番号'] == categoryId)
+          .map(item => String(item.ID)) // IDを文字列としてセットに保存
+      );
+    }
+
+    const wearCount = {};
+    const wearLogLastRow = wearLogSheet.getLastRow();
+    if (wearLogLastRow < 2) return [];
+    
+    // 着用ログから[itemId]の列のみ取得
+    const wearLogData = wearLogSheet.getRange(2, 2, wearLogLastRow - 1, 1).getValues();
+
+    wearLogData.forEach(row => { 
+      const itemId = String(row[0]); // IDを文字列として取得
+      if (!itemId) return;
+
+      // フィルタリングが有効な場合、対象アイテムかチェック
+      if (targetItemIds && !targetItemIds.has(itemId)) {
+        return;
+      }
+      
+      // itemsById に存在する（＝廃棄済みでない）アイテムのみカウント
+      if (itemsById[itemId]) { 
+        wearCount[itemId] = (wearCount[itemId] || 0) + 1; 
+      }
+    });
+    
+    return Object.entries(wearCount)
+      .sort(([, countA], [, countB]) => countB - countA)
+      .slice(0, 10)
+      .map(([itemId, count]) => ({ item: itemsById[itemId], count: count }))
+      .filter(entry => entry.item); // 念のため (ほぼ不要)
+
+  } catch (e) {
+    console.error('getWearRank Error: ' + e.stack);
+    // クライアント側で { error: '...' } を処理できるようにオブジェクトを返す
+    return { error: '着用回数ランキングの取得中にエラーが発生しました: ' + e.message };
+  }
 }
 
 function _getCoordinates(itemsById) {
