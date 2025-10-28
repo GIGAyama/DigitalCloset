@@ -100,7 +100,18 @@
       <div class="tab-pane fade" id="dashboard" role="tabpanel">
         <div class="dashboard-grid mt-4">
             <div class="chart-container" id="statsSummary" style="grid-column: 1 / -1;"></div>
-            <div class="chart-container"><h5>着用回数 Top 10</h5><ul id="wearRank" class="rank-list"></ul></div>
+            
+            <!-- ★改善: カテゴリフィルターを追加 -->
+            <div class="chart-container">
+              <div class="d-flex justify-content-between align-items-center mb-2">
+                <h5>着用回数 Top 10</h5>
+                <select id="wearRankCategoryFilter" class="form-control form-control-sm" style="width: auto;">
+                  <option value="">すべての種類</option>
+                  <!-- Options will be populated by JS -->
+                </select>
+              </div>
+              <ul id="wearRank" class="rank-list"></ul>
+            </div>
             
             <div class="chart-container">
               <div class="d-flex justify-content-between align-items-center mb-2">
@@ -236,9 +247,21 @@
     </div>
   </div></div></div>
 
+  <!-- ★改善: AI提案ボタンを追加 -->
   <div class="modal fade" id="itemDetailModal" tabindex="-1"><div class="modal-dialog modal-fullscreen"><div class="modal-content">
-    <div class="modal-header"><h5 class="modal-title">アイテム詳細</h5><button type="button" class="close" data-dismiss="modal"><span>&times;</span></button></div>
+    <div class="modal-header">
+      <h5 class="modal-title">アイテム詳細</h5>
+      <div>
+        <button type="button" id="aiSuggestFromDetailBtn" class="btn btn-danger btn-sm mr-2">
+          <i class="fas fa-magic"></i> AIコーデ提案
+        </button>
+        <button type="button" class="close" data-dismiss="modal" style="font-size: 1.5rem; line-height: 1;">
+          <span>&times;</span>
+        </button>
+      </div>
+    </div>
     <div class="modal-body" id="itemDetailContent">
+      <!-- Content populated by JS -->
     </div>
   </div></div></div>
 
