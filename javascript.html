@@ -219,6 +219,8 @@
           : `<div class="table-responsive-sm">${createDisposedItemTable(disposedItems)}</div>`;
   }
 
+  // ★改善: 表示情報を削減 (名前とブランドのみ)
+  // ★改善: 「今日着た！」ボタンを削除
   function createItemCard(item) {
     const imageUrl = getImageUrl(item, 400);
     return `<div class="col-6 col-md-4 col-lg-3 mb-4">
@@ -227,11 +229,8 @@
                 <div class="item-card-body">
                   <h5>${item['名前'] || "名称未設定"}</h5>
                   <p>${item['ブランド'] || "ブランド未設定"}</p>
-                  <p class="d-none d-md-block">${item['種類']} / ${item['色']}</p>
-                  <p class="d-none d-md-block">¥${item['価格'].toLocaleString()}</p>
                 </div>
                 <div>
-                  <button class="btn btn-sm btn-block btn-success mb-2" onclick="handleLogWear('${item.ID}')">今日着た！</button>
                   <div class="item-card-footer">
                     <button class="btn btn-sm btn-outline-primary" onclick="openItemModal('${item.ID}')">編集</button>
                     <button class="btn btn-sm btn-outline-danger" onclick="handleDeleteItem('${item.ID}')">廃棄</button>
@@ -245,15 +244,11 @@
     const rows = items.map(item => {
       const imageUrl = getImageUrl(item, 100);
       return `<tr>
-        <td>${item.ID}</td>
         <td><img loading="lazy" src="${imageUrl}" class="item-thumb" alt="${item['名前']}" onclick="openItemDetailModal('${item.ID}')" style="cursor: pointer;"></td>
         <td>${item['名前'] || ""}</td>
         <td>${item['ブランド'] || ""}</td>
-        <td>${item['種類'] || ""}</td>
-        <td>¥${item['価格'].toLocaleString()}</td>
         <td>
           <div class="btn-group">
-            <button class="btn btn-sm btn-success" onclick="handleLogWear('${item.ID}')">着用</button>
             <button class="btn btn-sm btn-outline-primary" onclick="openItemModal('${item.ID}')">編集</button>
             <button class="btn btn-sm btn-outline-danger" onclick="handleDeleteItem('${item.ID}')">廃棄</button>
           </div>
@@ -261,7 +256,7 @@
       </tr>`
     }).join("");
     return `<div class="table-responsive-sm"><table class="table table-hover bg-white rounded shadow-sm">
-              <thead class="thead-light"><tr><th>ID</th><th></th><th>名前</th><th>ブランド</th><th>種類</th><th>価格</th><th>操作</th></tr></thead>
+              <thead class="thead-light"><tr><th></th><th>名前</th><th>ブランド</th><th>操作</th></tr></thead>
               <tbody>${rows}</tbody>
             </table></div>`;
   }
@@ -499,6 +494,9 @@
       }
   }
 
+  // ★改善: この関数はClosetタブからは呼び出されなくなりましたが、
+  // 他の機能（将来的な拡張など）のために残しておくこともできます。
+  // 今回はボタン削除に伴い、呼び出し元がなくなったことを確認。
   async function handleLogWear(id) {
     if (id) { 
         showLoading(true);
@@ -753,7 +751,9 @@
           if (result.status === 'success') {
               $('#coordModal').modal('hide');
               if (dashboardDataCache) {
-                await setupDashboard();
+                // ★改善: キャッシュを無効化し、次回ダッシュボード表示時に再読み込みさせる
+                dashboardDataCache = null; 
+                // await setupDashboard(); // すぐに再読み込みすると重いのでキャッシュ無効化に留める
               }
           }
       } catch (error) {
@@ -828,13 +828,81 @@
           if (result.status === 'success') {
               container.querySelector('button').style.display = 'none';
               container.querySelector('.rating-stars').innerHTML = '<span class="text-success">評価を保存しました！</span>';
-              if(dashboardDataCache) await setupDashboard();
+              if(dashboardDataCache) dashboardDataCache = null; // キャッシュを無効化
           }
       } catch(error) {
            onFailure(error);
       }
   }
   
+  /**
+   * ★新機能: 詳細モーダルからのAI提案保存
+   * @param {HTMLElement} element -クリックされた要素
+   * @param {number} rating - 評価（0の場合は保存のみ）
+   * @param {string} baseItemId - 詳細モーダルを開いているアイテムのID（更新用）
+   */
+  async function saveAiSuggestionFromDetail(element, rating, baseItemId) {
+    const itemIdsString = element.dataset.itemIds;
+    const reason = element.dataset.reason || '';
+    if (!itemIdsString) { 
+      onFailure({ message: 'アイテムIDが見つかりませんでした。' }); 
+      return; 
+    }
+    
+    const itemIds = JSON.parse(itemIdsString);
+    const container = element.closest('.rank-item');
+    
+    // ボタンや星を無効化
+    container.querySelectorAll('button, .star').forEach(el => {
+      el.style.pointerEvents = 'none';
+      el.style.opacity = '0.5';
+    });
+
+    try {
+      const result = await callServerFunction('saveCoordinate', { itemIds, rating, reason });
+      Toast.fire({ icon: result.status === 'success' ? 'success' : 'error', title: result.message });
+
+      if (result.status === 'success') {
+        // 保存成功
+        container.querySelector('.saved-coord-actions').innerHTML = ''; // 保存ボタン削除
+        container.querySelector('.rating-stars').innerHTML = `<span class="text-success small">評価(${rating > 0 ? rating : '保存'})しました！</span>`;
+        
+        // ★重要: 「このアイテムを使ったコーデ」セクションをリロードする
+        const coordListContainer = document.getElementById('itemDetailCoords');
+        const oldCoordsHtml = coordListContainer.innerHTML;
+        coordListContainer.innerHTML = '<h5><span class="spinner-border spinner-border-sm"></span> コーデリストを更新中...</h5>';
+
+        // サーバーから最新のコーデ情報を再取得
+        const data = await callServerFunction('getItemDetails', baseItemId);
+        
+        // HTML全体を差し替えるとAI提案セクションが消えるので、コーデ部分だけ差し替える
+        const tempDiv = document.createElement('div');
+        tempDiv.innerHTML = buildItemDetailHtml(data);
+        const newCoordListHtml = tempDiv.querySelector('#itemDetailCoords').innerHTML;
+        coordListContainer.innerHTML = newCoordListHtml;
+        
+        // Dashboardキャッシュも更新
+        if (dashboardDataCache) {
+          dashboardDataCache = null; // キャッシュを無効化
+        }
+      } else {
+        // 保存失敗時はボタンを戻す
+        container.querySelectorAll('button, .star').forEach(el => {
+          el.style.pointerEvents = 'auto';
+          el.style.opacity = '1';
+        });
+      }
+    } catch(error) {
+       onFailure(error);
+       // エラー時もボタンを戻す
+       container.querySelectorAll('button, .star').forEach(el => {
+          el.style.pointerEvents = 'auto';
+          el.style.opacity = '1';
+       });
+    }
+  }
+
+
   function rateHover(starContainer, isHovering, rating) {
       const stars = starContainer.querySelectorAll('.star');
       if (isHovering) {
@@ -1036,6 +1104,13 @@
   // ダッシュボード & 詳細画面
   //----------------------------------------------------------------
   async function setupDashboard() {
+      // キャッシュがあればそれを使う、なければサーバーから取得
+      if (dashboardDataCache) {
+        renderDashboard(dashboardDataCache);
+        await loadNeglectedItems(); // ご無沙汰アイテムは都度読み込み
+        return;
+      }
+      
       showLoading(true);
       try {
           dashboardDataCache = await callServerFunction('getDashboardData');
@@ -1065,7 +1140,16 @@
       Object.values(charts).forEach(c => c.destroy());
       charts = {};
       renderStatsSummary(data.stats);
-      renderWearRank(data.wearRank);
+
+      // ★新機能: カテゴリフィルターの設定とイベントリスナー
+      populateWearRankCategoryFilter(); // フィルタードロップダウンを生成
+      renderWearRank(data.wearRank); // 初回描画 (全カテゴリ)
+      
+      // 既存リスナーを削除してから設定
+      const wearRankFilter = document.getElementById('wearRankCategoryFilter');
+      wearRankFilter.removeEventListener('change', handleWearRankFilterChange); 
+      wearRankFilter.addEventListener('change', handleWearRankFilterChange); 
+
       renderBrandRank(data.brandData);
       populateCoordFilter(data.coordinates);
       renderSavedCoords(data.coordinates);
@@ -1080,6 +1164,13 @@
       const data = await callServerFunction('getItemDetails', itemId);
       const contentDiv = document.getElementById('itemDetailContent');
       contentDiv.innerHTML = buildItemDetailHtml(data);
+      
+      // ★新機能: AIコーデ提案ボタンにイベント設定
+      const aiBtn = document.getElementById('aiSuggestFromDetailBtn');
+      if (aiBtn) { // ボタンがHTMLに追加されていれば
+        aiBtn.onclick = () => handleAiSuggestFromDetail(itemId, aiBtn);
+      }
+
       $('#itemDetailModal').modal('show');
     } catch (error) {
       onFailure(error);
@@ -1088,7 +1179,7 @@
     }
   }
 
-  // ★新機能: アイテム詳細画面のHTMLを生成
+  // ★新機能: アイテム詳細画面のHTMLを生成 (AI提案セクション追加)
   function buildItemDetailHtml(data) {
     const { item, coordinates, wearStats, costPerWear } = data;
     const imageUrl = getImageUrl(item, 400);
@@ -1151,7 +1242,93 @@
         </ul>
       </div>
     `;
-    return headerHtml + coordsHtml;
+    
+    // ★新機能: AI提案セクションを追加
+    const aiSuggestionHtml = `
+      <div id="itemDetailAiSuggestions" class="mt-4" style="display: none;">
+        <h5 class="d-flex justify-content-between align-items-center">
+          <span>AIコーデ提案</span>
+          <textarea id="aiDetailRequest" class="form-control form-control-sm" rows="1" placeholder="要望（例: デート用）" style="width: 60%;"></textarea>
+        </h5>
+        <div id="aiDetailSuggestionList" class="rank-list">
+          <p class="text-muted">「AIコーデ提案」ボタンを押してください。</p>
+        </div>
+      </div>
+    `;
+
+    return headerHtml + coordsHtml + aiSuggestionHtml;
+  }
+
+  /**
+   * ★新機能: 詳細モーダル内でAI提案を実行
+   * @param {string} baseItemId - 基準アイテムID
+   * @param {HTMLElement} btnElement - クリックされたボタン
+   */
+  async function handleAiSuggestFromDetail(baseItemId, btnElement) {
+    const suggestionContainer = document.getElementById('itemDetailAiSuggestions');
+    const listContainer = document.getElementById('aiDetailSuggestionList');
+    const requestInput = document.getElementById('aiDetailRequest');
+
+    // コンテナを表示
+    suggestionContainer.style.display = 'block';
+    
+    // ボタンをローディング状態に
+    btnElement.disabled = true;
+    btnElement.innerHTML = '<span class="spinner-border spinner-border-sm"></span> 提案を取得中...';
+    listContainer.innerHTML = '<div class="d-flex justify-content-center mt-3"><div class="spinner-border text-danger" role="status"><span class="sr-only">...</span></div></div>';
+
+    try {
+      const customRequest = requestInput.value;
+      const response = await callServerFunction('getStyleSuggestion', { baseItemId: baseItemId, customRequest: customRequest });
+      const suggestions = response.suggestions;
+
+      if (!suggestions || suggestions.length === 0) {
+        listContainer.innerHTML = '<p class="text-muted">良い提案が見つかりませんでした。</p>';
+      } else {
+        // 提案を描画
+        listContainer.innerHTML = suggestions.map(coord => {
+          const itemImages = coord.items.map(i => {
+            const d = getImageUrl(i, 100);
+            return `<img loading="lazy" src="${d}" alt="${i['名前']}">`;
+          }).join("");
+          
+          const itemIds = coord.items.map(i => i.ID);
+          const safeReason = coord.reason.replace(/'/g, '&apos;');
+          
+          const ratingStars = [1, 2, 3, 4, 5].map(v => 
+            `<span class="star" 
+                   data-item-ids='${JSON.stringify(itemIds)}' 
+                   data-reason='${safeReason}' 
+                   onmouseover="rateHover(this.parentElement, true, ${v})" 
+                   onmouseout="renderSavedCoordRating(this.parentElement, 0)" 
+                   onclick="saveAiSuggestionFromDetail(this, ${v}, '${baseItemId}')">☆</span>`
+          ).join('');
+
+          return `<li class="rank-item">
+                    <div class="saved-coord-item">
+                      <div class="saved-coord-main">
+                        <div class="suggestion-item-images">${itemImages}</div>
+                        <div class="ml-auto rating-stars" data-current-rating="0">${ratingStars}</div>
+                        <div class="saved-coord-actions">
+                          <button class="btn btn-sm btn-outline-info" 
+                                  data-item-ids='${JSON.stringify(itemIds)}' 
+                                  data-reason='${safeReason}' 
+                                  onclick="saveAiSuggestionFromDetail(this, 0, '${baseItemId}')">保存</button>
+                        </div>
+                      </div>
+                      <p class="coord-reason text-muted small"><em>AI: ${coord.reason}</em></p>
+                    </div>
+                  </li>`;
+        }).join("");
+      }
+    } catch (error) {
+      onFailure(error);
+      listContainer.innerHTML = `<p class="text-danger">提案の取得中にエラーが発生しました。</p>`;
+    } finally {
+      // ボタンを元に戻す
+      btnElement.disabled = false;
+      btnElement.innerHTML = '<i class="fas fa-magic"></i> 再度提案する';
+    }
   }
 
   function renderCoordItem(coord, mainItemId) {
@@ -1200,9 +1377,21 @@
     starContainer.style.pointerEvents = 'none';
     try {
       await callServerFunction('updateCoordinateRating', { coordId, rating });
-      await openItemDetailModal(itemId);
+      // ★改善: モーダル全体をリロードするとAI提案が消えるため、評価部分のみを更新
+      starContainer.dataset.currentRating = rating;
+      renderSavedCoordRating(starContainer, rating);
+      // await openItemDetailModal(itemId); // 全体リロードを中止
+      Toast.fire({ icon: 'success', title: '評価を更新しました。' });
+
+      // Dashboardキャッシュも更新
+      if (dashboardDataCache) {
+        const coordInCache = dashboardDataCache.coordinates.find(c => c.id == coordId);
+        if (coordInCache) coordInCache.rating = rating;
+      }
     } catch(error) {
       onFailure(error);
+    } finally {
+      starContainer.style.pointerEvents = 'auto';
     }
   }
 
@@ -1223,7 +1412,9 @@
         try {
             const res = await callServerFunction('deleteCoordinate', coordId);
             Toast.fire({ icon: 'success', title: res.message });
-            if (dashboardDataCache) await setupDashboard();
+            if (dashboardDataCache) dashboardDataCache = null; // キャッシュ無効化
+            
+            // ★改善: モーダルをリロード
             await openItemDetailModal(itemId);
         } catch(error) {
             onFailure(error);
@@ -1261,6 +1452,39 @@
       filter.innerHTML = '<option value="">すべてのアイテム</option>' + options;
   }
 
+  /**
+   * ★新機能: 着用回数ランキングのカテゴリフィルターを生成
+   */
+  function populateWearRankCategoryFilter() {
+    const filter = document.getElementById('wearRankCategoryFilter');
+    if (masterData && masterData.categories) {
+      const options = masterData.categories
+        .map(cat => `<option value="${cat.id}">${cat.name}</option>`)
+        .join('');
+      filter.innerHTML = '<option value="">すべての種類</option>' + options;
+    }
+  }
+
+  /**
+   * ★新機能: 着用回数ランキングのフィルター変更を処理
+   */
+  async function handleWearRankFilterChange() {
+    const categoryId = document.getElementById('wearRankCategoryFilter').value;
+    const list = document.getElementById('wearRank');
+    list.innerHTML = '<li><div class="spinner-border spinner-border-sm" role="status"></div> 読み込み中...</li>';
+    showLoading(true);
+    try {
+      // サーバーにカテゴリIDを渡して、フィルタリングされたランキングを取得
+      const rankedData = await callServerFunction('getWearRank', { categoryId: categoryId });
+      renderWearRank(rankedData);
+    } catch(error) {
+      onFailure(error);
+      list.innerHTML = '<li>エラーが発生しました。</li>';
+    } finally {
+      showLoading(false);
+    }
+  }
+
   function renderWearRank(data) {
       const list = document.getElementById('wearRank');
       if (!data || data.length === 0) {
@@ -1270,7 +1494,7 @@
       list.innerHTML = data.map(d => {
           const imgUrl = getImageUrl(d.item, 100);
           return `<li class="rank-item">
-                      <img loading="lazy" src="${imgUrl}" alt="${d.item['名前']}">
+                      <img loading="lazy" src="${imgUrl}" alt="${d.item['名前']}" onclick="openItemDetailModal('${d.item.ID}')" style="cursor: pointer;">
                       <div class="rank-item-info">
                         <div class="name">${d.item['名前']}</div>
                         <div class="brand">${d.item['ブランド']}</div>
@@ -1384,6 +1608,8 @@
         try {
             const res = await callServerFunction('deleteCoordinate', coordId);
             Toast.fire({ icon: 'success', title: res.message });
+            // ★改善: キャッシュを無効化
+            dashboardDataCache = null;
             await setupDashboard();
         } catch(error) {
             onFailure(error);
