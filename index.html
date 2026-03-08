@@ -190,19 +190,36 @@
     <div class="modal-footer"><button type="button" class="btn btn-secondary" data-dismiss="modal">キャンセル</button><button type="button" id="saveCoordBtn" class="btn btn-info">このコーデを保存</button></div>
   </div></div></div>
 
+  <!-- ★★★ 修正: AIスタイリストモーダルのHTML構造を変更 ★★★ -->
   <div class="modal fade" id="styleModal" tabindex="-1"><div class="modal-dialog modal-fullscreen"><div class="modal-content">
         <div class="modal-header"><h5 class="modal-title">AI Stylist</h5><button type="button" class="close" data-dismiss="modal"><span>&times;</span></button></div>
-        <div class="modal-body">
-          <div class="row h-100">
-            <div class="col-md-5 d-flex flex-column">
+        
+        <!-- ★ 修正: modal-body に .style-modal-body クラスを追加 -->
+        <div class="modal-body style-modal-body">
+          
+          <!-- ★ 修正: .row.h-100 を .style-modal-grid に変更 -->
+          <div class="style-modal-grid">
+            
+            <!-- ★ 修正: 左カラムのラッパーを変更 -->
+            <div class="style-modal-left">
               <h6>1. AIへの要望（任意）</h6>
               <textarea id="styleRequest" class="form-control mb-3" rows="2" placeholder="例：公園に行くのでカジュアルに、寒くないように、デートに着ていきたい 等"></textarea>
               <h6 class="mt-2">2. 基準にするアイテムを選んでください</h6>
-              <div id="style-base-item-list"></div>
+              
+              <!-- ★ 修正: #style-base-item-list をスクロールコンテナで囲む -->
+              <div class="style-modal-scroll-container">
+                <div id="style-base-item-list"></div>
+              </div>
             </div>
-            <div class="col-md-7 d-flex flex-column">
+            
+            <!-- ★ 修正: 右カラムのラッパーを変更 -->
+            <div class="style-modal-right">
               <h6 class="mt-2 mt-md-0">3. AIからの提案</h6>
-              <div id="style-suggestion-list" class="flex-grow-1"><p class="text-muted">ここに提案アイテムが表示されます。</p></div>
+              
+              <!-- ★ 修正: #style-suggestion-list に .style-modal-scroll-container クラスを追加 -->
+              <div id="style-suggestion-list" class="style-modal-scroll-container">
+                <p class="text-muted">ここに提案アイテムが表示されます。</p>
+              </div>
             </div>
           </div>
         </div>
@@ -255,7 +272,8 @@
         <button type="button" id="aiSuggestFromDetailBtn" class="btn btn-danger btn-sm mr-2">
           <i class="fas fa-magic"></i> AIコーデ提案
         </button>
-        <button type="button" class="close" data-dismiss="modal" style="font-size: 1.5rem; line-height: 1;">
+        <!-- ★ 修正: インラインスタイルを削除 -->
+        <button type="button" class="close" data-dismiss="modal">
           <span>&times;</span>
         </button>
       </div>
@@ -296,3 +314,4 @@
 
 </body>
 </html>
+
