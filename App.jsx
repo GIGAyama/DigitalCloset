@@ -68,30 +68,38 @@ const deleteCoord = (id) => dbOp(STORE_COORDS, 'readwrite', store => store.delet
 // ============================================================================
 // 2. Image Processing & Gemini API Utils
 // ============================================================================
-const compressImage = (file, maxSide = 1200, quality = 0.8) => {
+// スマホのメモリ不足対策：FileReaderではなくURL.createObjectURLを使用し、解像度を800pxに最適化
+const compressImage = (file, maxSide = 800, quality = 0.7) => {
   return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
-    reader.onload = (event) => {
-      const img = new Image();
-      img.src = event.target.result;
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        let { width, height } = img;
-        if (width > height) {
-          if (width > maxSide) { height = Math.round((height * maxSide) / width); width = maxSide; }
-        } else {
-          if (height > maxSide) { width = Math.round((width * maxSide) / height); height = maxSide; }
-        }
-        canvas.width = width; canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        ctx.fillStyle = '#FFFFFF'; ctx.fillRect(0, 0, width, height);
-        ctx.drawImage(img, 0, 0, width, height);
-        resolve(canvas.toDataURL('image/jpeg', quality));
-      };
-      img.onerror = reject;
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    
+    img.onload = () => {
+      URL.revokeObjectURL(url); // メモリ解放
+      const canvas = document.createElement('canvas');
+      let { width, height } = img;
+      
+      if (width > height) {
+        if (width > maxSide) { height = Math.round((height * maxSide) / width); width = maxSide; }
+      } else {
+        if (height > maxSide) { width = Math.round((width * maxSide) / height); height = maxSide; }
+      }
+      
+      canvas.width = width; 
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#FFFFFF'; 
+      ctx.fillRect(0, 0, width, height);
+      ctx.drawImage(img, 0, 0, width, height);
+      resolve(canvas.toDataURL('image/jpeg', quality));
     };
-    reader.onerror = reject;
+    
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error('画像の読み込みに失敗しました'));
+    };
+    
+    img.src = url;
   });
 };
 
@@ -121,7 +129,11 @@ const analyzeImageWithGemini = async (base64Data, apiKey) => {
   };
 
   const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-  if (!response.ok) throw new Error('API Request Failed');
+  
+  if (!response.ok) {
+    const errData = await response.json().catch(() => ({}));
+    throw new Error(errData.error?.message || `API Error: ${response.status}`);
+  }
   
   try {
     const data = await response.json();
@@ -188,7 +200,10 @@ ${favCoords || 'まだありません'}`;
   while (retryCount < 3) {
     try {
       const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-      if (!response.ok) throw new Error('API Request Failed');
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error?.message || `API Error: ${response.status}`);
+      }
       const data = await response.json();
       return data.candidates?.[0]?.content?.parts?.[0]?.text || 'すみません、回答を生成できませんでした。';
     } catch (err) {
@@ -245,7 +260,10 @@ ${wardrobe}`;
   };
 
   const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-  if (!response.ok) throw new Error('API Request Failed');
+  if (!response.ok) {
+    const errData = await response.json().catch(() => ({}));
+    throw new Error(errData.error?.message || `API Error: ${response.status}`);
+  }
   const data = await response.json();
   const parsed = JSON.parse(data.candidates?.[0]?.content?.parts?.[0]?.text || '{"suggestions":[]}');
   return parsed.suggestions || [];
@@ -286,7 +304,7 @@ export default function App() {
 
   const showToast = (message, type = 'info') => {
     setToast({ show: true, message, type });
-    setTimeout(() => setToast({ show: false, message: '', type: 'info' }), 3000);
+    setTimeout(() => setToast({ show: false, message: '', type: 'info' }), 5000); // エラーが読みやすいように5秒に延長
   };
 
   // 廃棄フラグでフィルタリング (パフォーマンス最適化のためメモ化)
@@ -297,11 +315,11 @@ export default function App() {
     <div className="min-h-screen bg-gray-50 text-gray-800 font-sans selection:bg-blue-200 flex justify-center">
       {/* Toast */}
       {toast.show && (
-        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 animate-in fade-in slide-in-from-top-5">
-          <div className={`flex items-center gap-2 px-4 py-3 rounded-full shadow-lg text-sm font-medium text-white
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 animate-in fade-in slide-in-from-top-5 w-[90%] max-w-sm">
+          <div className={`flex items-start gap-2 px-4 py-3 rounded-2xl shadow-lg text-sm font-medium text-white
             ${toast.type === 'error' ? 'bg-red-500' : toast.type === 'success' ? 'bg-emerald-500' : 'bg-gray-800'}`}>
-            {toast.type === 'error' ? <AlertCircle size={18} /> : <CheckCircle2 size={18} />}
-            {toast.message}
+            {toast.type === 'error' ? <AlertCircle size={18} className="shrink-0 mt-0.5" /> : <CheckCircle2 size={18} className="shrink-0 mt-0.5" />}
+            <p className="break-words leading-relaxed">{toast.message}</p>
           </div>
         </div>
       )}
@@ -916,7 +934,7 @@ function AiStylistView({ items, coords, setCoords, showToast, apiKey, onClose })
         setSuggestions(validResults);
       }
     } catch (error) {
-      showToast('AIの提案に失敗しました', 'error');
+      showToast(error.message || 'AIの提案に失敗しました', 'error');
     } finally {
       setIsLoading(false);
     }
@@ -1309,7 +1327,7 @@ function AIChatView({ items, coords, apiKey, showToast }) {
       const reply = await askGeminiChat(textToSend, userMsg.image, apiHistory, items, coords, apiKey);
       setMessages(prev => [...prev, { role: 'model', text: reply }]);
     } catch (err) {
-      showToast('AIの応答に失敗しました: ' + err.message, 'error');
+      showToast(err.message || 'AIの応答に失敗しました', 'error');
     } finally {
       setIsLoading(false);
     }
