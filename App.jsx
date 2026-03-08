@@ -104,7 +104,7 @@ const compressImage = (file, maxSide = 800, quality = 0.7) => {
 };
 
 const analyzeImageWithGemini = async (base64Data, apiKey) => {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
   const base64Str = base64Data.split(',')[1];
   const schema = {
     type: "OBJECT",
@@ -157,7 +157,7 @@ const analyzeImageWithGemini = async (base64Data, apiKey) => {
 };
 
 const askGeminiChat = async (question, imageBase64, chatHistory, items, coords, apiKey) => {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
   
   const wardrobe = items.map(i => `- ${i.name} (${i.category}, ${i.color}, ${i.seasons?.join('/')})`).join('\n');
   const favCoords = coords.filter(c => c.rating >= 4).map(c => `- ` + c.itemIds.map(id => items.find(i=>i.id===id)?.name).filter(Boolean).join(' と ')).join('\n');
@@ -215,7 +215,7 @@ ${favCoords || 'まだありません'}`;
 };
 
 const askGeminiStylist = async (baseItem, requestText, items, apiKey) => {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
   
   const wardrobe = items.map(i => `ID:${i.id}, ${i.name} (${i.category}, ${i.color}, ${i.seasons?.join('/')})`).join('\n');
 
@@ -312,7 +312,8 @@ export default function App() {
   const disposedItems = useMemo(() => items.filter(i => i.disposedAt), [items]);
 
   return (
-    <div className="min-h-screen bg-gray-50 text-gray-800 font-sans selection:bg-blue-200 flex justify-center">
+    // 変更: h-[100dvh] を指定し、スマホの動的なビューポートに高さを完全一致させる
+    <div className="h-[100dvh] w-full bg-gray-50 text-gray-800 font-sans selection:bg-blue-200 flex justify-center overflow-hidden">
       {/* Toast */}
       {toast.show && (
         <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 animate-in fade-in slide-in-from-top-5 w-[90%] max-w-sm">
@@ -324,11 +325,11 @@ export default function App() {
         </div>
       )}
 
-      {/* Mobile-first Container */}
-      <div className="w-full max-w-md bg-white min-h-screen shadow-2xl overflow-hidden relative flex flex-col">
+      {/* Mobile-first Container (flex flex-col h-full に変更) */}
+      <div className="w-full max-w-md bg-white h-full shadow-2xl overflow-hidden relative flex flex-col">
         
-        {/* Header */}
-        <header className="px-5 py-4 flex items-center justify-between border-b border-gray-100 bg-white/90 backdrop-blur-md sticky top-0 z-30">
+        {/* Header (shrink-0 を追加し、高さを固定) */}
+        <header className="shrink-0 px-5 py-4 flex items-center justify-between border-b border-gray-100 bg-white/90 backdrop-blur-md z-30">
           <div className="flex items-center gap-2">
             {activeView !== 'main' ? (
               <button 
@@ -373,10 +374,10 @@ export default function App() {
           )}
         </header>
 
-        {/* Main Content Area */}
-        <main className="flex-1 overflow-y-auto pb-20 relative bg-gray-50/50">
+        {/* Main Content Area (flex-1 overflow-y-auto でここだけがスクロールする) */}
+        <main className="flex-1 overflow-y-auto relative bg-gray-50/50">
           {activeView === 'main' && (
-            <div className="animate-in fade-in duration-300">
+            <div className="animate-in fade-in duration-300 pb-6">
               {activeTab === 'closet' && (
                 <ClosetView 
                   items={activeItems} isLoading={isLoading} 
@@ -399,7 +400,7 @@ export default function App() {
           )}
 
           {activeView === 'disposed' && (
-             <div className="animate-in slide-in-from-right-4 fade-in duration-300 h-full">
+             <div className="animate-in slide-in-from-right-4 fade-in duration-300 h-full pb-6">
                <DisposedView 
                  items={disposedItems} 
                  onRestore={async (item) => {
@@ -408,6 +409,11 @@ export default function App() {
                    setItems(items.map(i => i.id === item.id ? updated : i));
                    showToast('クローゼットに戻しました', 'success');
                  }} 
+                 onPermanentDelete={async (id) => {
+                   await deleteItem(id);
+                   setItems(prev => prev.filter(i => i.id !== id));
+                   showToast('データを完全に削除しました', 'success');
+                 }}
                />
              </div>
           )}
@@ -424,7 +430,7 @@ export default function App() {
           )}
 
           {activeView === 'add' && (
-            <div className="animate-in slide-in-from-bottom-4 fade-in duration-300 h-full">
+            <div className="animate-in slide-in-from-bottom-4 fade-in duration-300 h-full pb-6">
               <AddView 
                 apiKey={apiKey} 
                 showToast={showToast}
@@ -438,7 +444,7 @@ export default function App() {
           )}
 
           {activeView === 'detail' && selectedItem && (
-            <div className="animate-in slide-in-from-right-4 fade-in duration-300 h-full">
+            <div className="animate-in slide-in-from-right-4 fade-in duration-300 h-full pb-6">
               <DetailView 
                 item={selectedItem}
                 onUpdate={async (updatedItem) => {
@@ -459,9 +465,9 @@ export default function App() {
           )}
         </main>
 
-        {/* Bottom Navigation */}
+        {/* Bottom Navigation (shrink-0 を付与し、absolute を解除して完全固定) */}
         {activeView === 'main' && (
-          <nav className="absolute bottom-0 w-full bg-white border-t border-gray-100 flex justify-around pb-safe pt-2 px-2 z-40 shadow-[0_-4px_20px_rgba(0,0,0,0.02)]">
+          <nav className="shrink-0 w-full bg-white border-t border-gray-100 flex justify-around pb-safe pt-2 px-2 z-40 shadow-[0_-4px_20px_rgba(0,0,0,0.02)]">
             <NavButton icon={<Shirt />} label="Closet" isActive={activeTab === 'closet'} onClick={() => setActiveTab('closet')} />
             <NavButton icon={<Layers />} label="Coord" isActive={activeTab === 'coord'} onClick={() => setActiveTab('coord')} />
             <NavButton icon={<CalendarDays />} label="Calendar" isActive={activeTab === 'calendar'} onClick={() => setActiveTab('calendar')} />
@@ -554,8 +560,22 @@ function ClosetView({ items, isLoading, onItemClick }) {
 function DetailView({ item, onUpdate, onDispose }) {
   const [isEditing, setIsEditing] = useState(false);
   const [formData, setFormData] = useState({ ...item });
+  const fileInputRef = useRef(null);
 
   const handleChange = (e) => setFormData({ ...formData, [e.target.name]: e.target.value });
+
+  const handleImageChange = async (e) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      try {
+        const compressedBase64 = await compressImage(file, 800, 0.7);
+        setFormData({ ...formData, imageUrl: compressedBase64 });
+      } catch (err) {
+        alert('画像の処理に失敗しました');
+      }
+    }
+    e.target.value = '';
+  };
 
   if (isEditing) {
     return (
@@ -564,6 +584,19 @@ function DetailView({ item, onUpdate, onDispose }) {
           <h3 className="font-bold text-lg">アイテムの編集</h3>
           <button onClick={() => setIsEditing(false)} className="text-gray-500 hover:bg-gray-100 p-1.5 rounded-full transition-colors" aria-label="閉じる"><X size={24}/></button>
         </div>
+
+        <div className="flex flex-col items-center gap-3 mb-4">
+          <div className="relative w-32 h-32 rounded-2xl overflow-hidden bg-gray-100 border border-gray-200 group cursor-pointer" onClick={() => fileInputRef.current?.click()}>
+            <img src={formData.imageUrl} alt="preview" className="w-full h-full object-cover" />
+            <div className="absolute inset-0 bg-black/40 flex flex-col items-center justify-center text-white opacity-0 group-hover:opacity-100 transition-opacity">
+              <Camera size={24} className="mb-1" />
+              <span className="text-[10px] font-bold">画像を変更</span>
+            </div>
+          </div>
+          <button onClick={() => fileInputRef.current?.click()} className="text-xs font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 px-4 py-2 rounded-xl transition-colors">画像を選択し直す</button>
+          <input type="file" ref={fileInputRef} accept="image/*" className="hidden" onChange={handleImageChange} />
+        </div>
+
         <div className="space-y-3">
           <div><label className="text-xs font-bold text-gray-500 ml-1">名前 <span className="text-red-500">*</span></label><input name="name" value={formData.name} onChange={handleChange} className="w-full p-3 bg-gray-50 rounded-xl border border-gray-200 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none transition-shadow" /></div>
           <div className="grid grid-cols-2 gap-3">
@@ -763,7 +796,7 @@ function CalendarView({ items, wearLogs, setWearLogs, showToast }) {
 }
 
 // ==================== Disposed View ====================
-function DisposedView({ items, onRestore }) {
+function DisposedView({ items, onRestore, onPermanentDelete }) {
   if (items.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center h-[60vh] text-gray-400">
@@ -781,7 +814,10 @@ function DisposedView({ items, onRestore }) {
           <div className="flex-1 flex flex-col justify-center">
             <h3 className="font-semibold text-gray-900 text-sm">{item.name}</h3>
             <p className="text-xs text-gray-500 mb-2">廃棄日: {new Date(item.disposedAt).toLocaleDateString()}</p>
-            <button onClick={() => onRestore(item)} className="self-start text-xs font-bold text-blue-600 bg-blue-50 px-3 py-1.5 rounded-lg flex items-center gap-1"><RotateCcw size={14}/> クローゼットに戻す</button>
+            <div className="flex gap-2 mt-1">
+              <button onClick={() => onRestore(item)} className="text-xs font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 px-3 py-2 rounded-lg flex items-center gap-1 transition-colors"><RotateCcw size={14}/> 戻す</button>
+              <button onClick={() => { if(window.confirm('このデータを完全に削除しますか？この操作は取り消せません。')) onPermanentDelete(item.id); }} className="text-xs font-bold text-red-600 bg-red-50 hover:bg-red-100 px-3 py-2 rounded-lg flex items-center gap-1 transition-colors"><Trash2 size={14}/> 完全削除</button>
+            </div>
           </div>
         </div>
       ))}
@@ -1191,36 +1227,45 @@ function SettingsView({ apiKey, setApiKey, showToast, onDataImported, onOpenDisp
   };
 
   const handleImport = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    // スマホで複数選択されたファイルをすべて配列として取得する
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+
+    if (!window.confirm(`選択された ${files.length} 個のファイルからデータをインポートします。よろしいですか？\n※データ量が多い場合、少し時間がかかります。`)) return;
+
+    showToast('データをインポート中...', 'info');
 
     try {
-      const text = await file.text();
-      const backupData = JSON.parse(text);
-      
-      // 旧バージョンのバックアップ（配列のみ）の互換性対応
-      const items = Array.isArray(backupData) ? backupData : (backupData.items || []);
-      const wearLogs = backupData.wearLogs || [];
-      const coords = backupData.coords || [];
-      
-      if (!window.confirm(`既存のデータは保持され、アイテム${items.length}件、着用記録${wearLogs.length}件、コーデ${coords.length}件のデータが追加/上書きされます。よろしいですか？`)) return;
+      let importedItemsCount = 0;
 
-      showToast('データをインポート中...', 'info');
+      // 選択された全ファイルを順番に処理する
+      for (const file of files) {
+        const text = await file.text();
+        const backupData = JSON.parse(text);
+        
+        // 旧バージョンのバックアップ（配列のみ）の互換性対応
+        const items = Array.isArray(backupData) ? backupData : (backupData.items || []);
+        const wearLogs = backupData.wearLogs || [];
+        const coords = backupData.coords || [];
 
-      for (const item of items) {
-        if (item.id && item.imageUrl) await saveItem(item);
-      }
-      for (const log of wearLogs) {
-        if (log.id && log.itemId) await saveWearLog(log);
-      }
-      for (const coord of coords) {
-        if (coord.id && coord.itemIds) await saveCoord(coord);
+        for (const item of items) {
+          if (item.id && item.imageUrl) await saveItem(item);
+        }
+        for (const log of wearLogs) {
+          if (log.id && log.itemId) await saveWearLog(log);
+        }
+        for (const coord of coords) {
+          if (coord.id && coord.itemIds) await saveCoord(coord);
+        }
+        
+        importedItemsCount += items.length;
       }
       
-      showToast('データを復元しました', 'success');
+      showToast(`復元が完了しました（アイテム計: ${importedItemsCount}件）`, 'success');
       onDataImported(); // データを再読み込み
     } catch (err) {
-      showToast('インポートに失敗しました。正しいJSONファイルか確認してください', 'error');
+      console.error(err);
+      showToast('一部のインポートに失敗しました。正しいJSONか確認してください', 'error');
     }
     e.target.value = '';
   };
@@ -1266,7 +1311,8 @@ function SettingsView({ apiKey, setApiKey, showToast, onDataImported, onOpenDisp
           <input 
             type="file" 
             ref={fileInputRef} 
-            accept=".json,application/json" 
+            multiple /* 複数選択を許可 */
+            accept="application/json,.json,text/plain,*/*" /* スマホでグレーアウトして押せなくなる現象を回避 */
             className="hidden" 
             onChange={handleImport} 
           />
