@@ -21,7 +21,8 @@ const coordLogSheet = ss.getSheetByName('コーディネートログ');
 
 function doGet() {
   return HtmlService.createTemplateFromFile('index').evaluate()
-   .setTitle('Digital Closet');
+   .setTitle('Digital Closet')
+   .setFaviconUrl('https://drive.google.com/uc?id=1unYpTLtY3O07CfzaZOwsVEQ4yi90Z-f5&.png');
 }
 
 function include(filename) {
