@@ -1180,12 +1180,14 @@
   }
 
   // ★新機能: アイテム詳細画面のHTMLを生成 (AI提案セクション追加)
+  // ★★★ 修正: レイアウト変更
   function buildItemDetailHtml(data) {
     const { item, coordinates, wearStats, costPerWear } = data;
     const imageUrl = getImageUrl(item, 400);
 
-    const headerHtml = `
-      <div class="item-detail-grid">
+    // 1. 上部セクション (写真 + 詳細情報)
+    const topSectionHtml = `
+      <div class="item-detail-top-grid">
         <div class="item-detail-img-container">
           <img loading="lazy" src="${imageUrl}" alt="${item['名前']}" onerror="this.src='${getImageUrl(null, 400)}'">
         </div>
@@ -1202,49 +1204,49 @@
             <dt>メモ</dt><dd>${item['メモ'] || '-'}</dd>
           </dl>
         </div>
-        <div class="item-detail-stats-container">
-          <div class="stat-box">
-            <div class="stat-value">${wearStats.total} <small>回</small></div>
-            <div class="stat-label">総着用回数</div>
-          </div>
-          <div class="stat-box">
-            <div class="stat-value">¥${costPerWear > 0 ? costPerWear.toLocaleString() : '-'}</div>
-            <div class="stat-label">コストパフォーマンス</div>
-          </div>
-        </div>
-        <div class="item-detail-wear-history">
-          <h5>着用履歴</h5>
-          <div class="wear-history-grid">
-            <div>
-              <h6>年度別</h6>
-              ${Object.keys(wearStats.byYear).length > 0
-                ? `<ul class="wear-history-list">${Object.entries(wearStats.byYear).sort((a,b) => b[0] - a[0]).map(([year, count]) => `<li>${year}年: <strong>${count}</strong>回</li>`).join('')}</ul>`
-                : '<p class="text-muted small">記録なし</p>'
-              }
-            </div>
-            <div>
-              <h6>最近の着用</h6>
-              ${wearStats.history.length > 0
-                ? `<ul class="wear-history-list">${wearStats.history.map(date => `<li>${date}</li>`).join('')}</ul>`
-                : '<p class="text-muted small">記録なし</p>'
-              }
-            </div>
-          </div>
-        </div>
       </div>
     `;
 
-    const coordsHtml = `
+    // 2. 下部セクション (統計、履歴、コーデ、AI提案) - ここから横幅全体
+    const bottomSectionHtml = `
+      <div class="item-detail-stats-container mt-4">
+        <div class="stat-box">
+          <div class="stat-value">${wearStats.total} <small>回</small></div>
+          <div class="stat-label">総着用回数</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-value">¥${costPerWear > 0 ? costPerWear.toLocaleString() : '-'}</div>
+          <div class="stat-label">コストパフォーマンス</div>
+        </div>
+      </div>
+
+      <div class="item-detail-wear-history mt-4">
+        <h5>着用履歴</h5>
+        <div class="wear-history-grid">
+          <div>
+            <h6>年度別</h6>
+            ${Object.keys(wearStats.byYear).length > 0
+              ? `<ul class="wear-history-list">${Object.entries(wearStats.byYear).sort((a,b) => b[0] - a[0]).map(([year, count]) => `<li>${year}年: <strong>${count}</strong>回</li>`).join('')}</ul>`
+              : '<p class="text-muted small">記録なし</p>'
+            }
+          </div>
+          <div>
+            <h6>最近の着用</h6>
+            ${wearStats.history.length > 0
+              ? `<ul class="wear-history-list">${wearStats.history.map(date => `<li>${date}</li>`).join('')}</ul>`
+              : '<p class="text-muted small">記録なし</p>'
+            }
+          </div>
+        </div>
+      </div>
+
       <div id="itemDetailCoords">
         <h5 class="mt-4">このアイテムを使ったコーデ</h5>
         <ul class="rank-list">
           ${coordinates.length > 0 ? coordinates.map(coord => renderCoordItem(coord, item.ID)).join('') : '<li class="text-muted">関連するコーデはありません。</li>'}
         </ul>
       </div>
-    `;
-    
-    // ★新機能: AI提案セクションを追加
-    const aiSuggestionHtml = `
+      
       <div id="itemDetailAiSuggestions" class="mt-4" style="display: none;">
         <h5 class="d-flex justify-content-between align-items-center">
           <span>AIコーデ提案</span>
@@ -1255,8 +1257,9 @@
         </div>
       </div>
     `;
-
-    return headerHtml + coordsHtml + aiSuggestionHtml;
+    
+    // 以前の <div class="item-detail-grid">...</div> を削除し、新しい構造を返す
+    return topSectionHtml + bottomSectionHtml;
   }
 
   /**
@@ -1327,7 +1330,8 @@
     } finally {
       // ボタンを元に戻す
       btnElement.disabled = false;
-      btnElement.innerHTML = '<i class="fas fa-magic"></i> 再度提案する';
+      // ★★★ 修正: テキストを「再度提案する」ではなく、元のテキストに戻す
+      btnElement.innerHTML = '<i class="fas fa-magic"></i> AIコーデ提案';
     }
   }
 
