@@ -87,7 +87,7 @@ const compressImage = (file, maxSide = 800, quality = 0.7) => {
 };
 
 const analyzeImageWithGemini = async (base64DataArray, apiKey, customCategories, customColors) => {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
   // Support both single string and array of base64 images
   const images = Array.isArray(base64DataArray) ? base64DataArray : [base64DataArray];
   
@@ -157,7 +157,7 @@ const analyzeImageWithGemini = async (base64DataArray, apiKey, customCategories,
 };
 
 const askGeminiChat = async (question, imageBase64, chatHistory, items, coords, apiKey) => {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
   const wardrobe = items.map(i => `- ${i.name} (${i.category}, ${i.color}, ${i.seasons?.join('/')})`).join('\n');
   const favCoords = coords.filter(c => c.rating >= 4).map(c => `- ` + c.itemIds.map(id => items.find(i=>i.id===id)?.name).filter(Boolean).join(' と ')).join('\n');
 
@@ -202,7 +202,7 @@ ${favCoords || 'まだありません'}`;
 };
 
 const askGeminiStylist = async (baseItem, requestText, items, apiKey) => {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
   const wardrobe = items.map(i => `ID:${i.id}, ${i.name} (${i.category}, ${i.color}, ${i.seasons?.join('/')})`).join('\n');
   const schema = {
     type: "OBJECT",
@@ -233,7 +233,7 @@ const askGeminiStylist = async (baseItem, requestText, items, apiKey) => {
 };
 
 const askGeminiStopper = async (imageBase64, items, apiKey) => {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
   const wardrobe = items.map(i => `- ${i.name} (${i.category}, ${i.color})`).join('\n');
   
   const prompt = `あなたは辛口で優秀なファッションコンサルタントです。
@@ -265,7 +265,7 @@ ${wardrobe || 'アイテムなし'}`;
 };
 
 const askGeminiReverseLookup = async (imageBase64, items, apiKey) => {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
   const wardrobe = items.map(i => `ID:${i.id}, ${i.name} (${i.category}, ${i.color})`).join('\n');
   
   const schema = {
