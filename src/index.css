@@ -1,0 +1,75 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 8px);
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes slide-in-from-bottom-2 {
+  from { transform: translateY(0.5rem); }
+  to { transform: translateY(0); }
+}
+@keyframes slide-in-from-bottom-4 {
+  from { transform: translateY(1rem); }
+  to { transform: translateY(0); }
+}
+@keyframes slide-in-from-right-4 {
+  from { transform: translateX(1rem); }
+  to { transform: translateX(0); }
+}
+@keyframes slide-in-from-top-2 {
+  from { transform: translateY(-0.5rem); }
+  to { transform: translateY(0); }
+}
+@keyframes slide-in-from-top-5 {
+  from { transform: translateY(-1.25rem); }
+  to { transform: translateY(0); }
+}
+@keyframes zoom-in-95 {
+  from { transform: scale(0.95); }
+  to { transform: scale(1); }
+}
+
+.animate-in {
+  animation-duration: 300ms;
+  animation-timing-function: ease-out;
+  animation-fill-mode: both;
+}
+.fade-in {
+  animation-name: fade-in;
+}
+.slide-in-from-bottom-2 {
+  animation-name: slide-in-from-bottom-2, fade-in;
+}
+.slide-in-from-bottom-4 {
+  animation-name: slide-in-from-bottom-4, fade-in;
+}
+.slide-in-from-right-4 {
+  animation-name: slide-in-from-right-4, fade-in;
+}
+.slide-in-from-top-2 {
+  animation-name: slide-in-from-top-2, fade-in;
+}
+.slide-in-from-top-5 {
+  animation-name: slide-in-from-top-5, fade-in;
+}
+.zoom-in-95 {
+  animation-name: zoom-in-95, fade-in;
+}
