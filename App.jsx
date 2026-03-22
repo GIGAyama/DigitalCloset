@@ -86,9 +86,10 @@ const compressImage = (file, maxSide = 800, quality = 0.7) => {
   });
 };
 
-const analyzeImageWithGemini = async (base64Data, apiKey, customCategories, customColors) => {
+const analyzeImageWithGemini = async (base64DataArray, apiKey, customCategories, customColors) => {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
-  const base64Str = base64Data.split(',')[1];
+  // Support both single string and array of base64 images
+  const images = Array.isArray(base64DataArray) ? base64DataArray : [base64DataArray];
   
   const categoryDesc = customCategories && customCategories.length > 0 
     ? `カテゴリ（以下のリストから最も適切なものを1つ選んでください。該当がない場合は「未分類」としてください: ${customCategories.join(', ')}）`
@@ -105,16 +106,24 @@ const analyzeImageWithGemini = async (base64Data, apiKey, customCategories, cust
       color: { type: "STRING", description: colorDesc },
       seasons: { type: "ARRAY", items: { type: "STRING" }, description: "適した季節（春, 夏, 秋, 冬）" },
       material: { type: "STRING", description: "推測される素材" },
+      brand: { type: "STRING", description: "ブランド名（タグや特徴から推測できる場合。不明な場合は空文字）" },
+      price: { type: "INTEGER", description: "推定価格（円）。画像から推測できない場合は0" },
+      purchaseYear: { type: "STRING", description: "推定購入年（不明な場合は空文字）" },
       coordinate: { type: "STRING", description: "おすすめのコーディネート" },
       advice: { type: "STRING", description: "手入れや洗濯の際のアドバイス" }
     },
     required: ["name", "category", "color", "seasons", "material", "coordinate", "advice"]
   };
 
+  const imageParts = images.map(img => ({ inlineData: { mimeType: "image/jpeg", data: img.split(',')[1] } }));
+  const promptText = images.length > 1
+    ? `あなたはプロのスタイリストです。添付された${images.length}枚の画像はすべて同じ衣類アイテムを異なる角度・距離から撮影したものです。すべての画像を総合的に解析し、JSON形式で詳細を抽出してください。タグやブランドロゴが写っている画像がある場合は、それを元にブランド名を特定してください。カテゴリと色は、指定されたリストがある場合は必ずその中から選んでください。`
+    : `あなたはプロのスタイリストです。この衣類画像を解析し、JSON形式で詳細を抽出してください。タグやブランドロゴが見える場合は、ブランド名を特定してください。カテゴリと色は、指定されたリストがある場合は必ずその中から選んでください。`;
+
   const payload = {
     contents: [{ parts: [
-      { text: "あなたはプロのスタイリストです。この衣類画像を解析し、JSON形式で詳細を抽出してください。カテゴリと色は、指定されたリストがある場合は必ずその中から選んでください。" },
-      { inlineData: { mimeType: "image/jpeg", data: base64Str } }
+      { text: promptText },
+      ...imageParts
     ]}],
     generationConfig: { responseMimeType: "application/json", responseSchema: schema }
   };
@@ -136,6 +145,9 @@ const analyzeImageWithGemini = async (base64Data, apiKey, customCategories, cust
       color: parsed.color || '-',
       seasons: Array.isArray(parsed.seasons) ? parsed.seasons : [],
       material: parsed.material || '-',
+      brand: parsed.brand || '',
+      price: parsed.price && parsed.price > 0 ? parsed.price : null,
+      purchaseYear: parsed.purchaseYear || '',
       coordinate: parsed.coordinate || '',
       advice: parsed.advice || ''
     };
@@ -799,27 +811,7 @@ function DetailView({ item, items, coords, onUpdate, onDispose, customCategories
           <input type="file" ref={fileInputRef} accept="image/*" className="hidden" onChange={handleImageChange} />
         </div>
 
-        <div className="space-y-4">
-          <div><label className="text-[11px] font-bold text-gray-500 ml-1 mb-1 block">名前 <span className="text-red-500">*</span></label><input name="name" value={formData.name} onChange={handleChange} className="w-full p-3.5 bg-gray-50 rounded-xl border border-gray-200 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none transition-all placeholder:text-gray-400" /></div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="text-[11px] font-bold text-gray-500 ml-1 mb-1 block">カテゴリ</label>
-              <input name="category" value={formData.category} onChange={handleChange} list="category-list" className="w-full p-3.5 bg-gray-50 rounded-xl border border-gray-200 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none transition-all placeholder:text-gray-400" />
-              <datalist id="category-list">{customCategories.map(cat => <option key={cat} value={cat} />)}</datalist>
-            </div>
-            <div>
-              <label className="text-[11px] font-bold text-gray-500 ml-1 mb-1 block">色</label>
-              <input name="color" value={formData.color} onChange={handleChange} list="color-list" className="w-full p-3.5 bg-gray-50 rounded-xl border border-gray-200 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none transition-all placeholder:text-gray-400" />
-              <datalist id="color-list">{customColors.map(color => <option key={color} value={color} />)}</datalist>
-            </div>
-          </div>
-          <div><label className="text-[11px] font-bold text-gray-500 ml-1 mb-1 block">ブランド</label><input name="brand" value={formData.brand || ''} onChange={handleChange} className="w-full p-3.5 bg-gray-50 rounded-xl border border-gray-200 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none transition-all placeholder:text-gray-400" placeholder="例: UNIQLO" /></div>
-          <div className="grid grid-cols-2 gap-4">
-            <div><label className="text-[11px] font-bold text-gray-500 ml-1 mb-1 block">価格 (円)</label><input type="text" inputMode="numeric" pattern="[0-9]*" name="price" value={formData.price || ''} onChange={handleChange} className="w-full p-3.5 bg-gray-50 rounded-xl border border-gray-200 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none transition-all placeholder:text-gray-400" placeholder="例: 3990" /></div>
-            <div><label className="text-[11px] font-bold text-gray-500 ml-1 mb-1 block">購入年</label><input type="text" inputMode="numeric" pattern="[0-9]*" name="purchaseYear" value={formData.purchaseYear || ''} onChange={handleChange} className="w-full p-3.5 bg-gray-50 rounded-xl border border-gray-200 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none transition-all placeholder:text-gray-400" placeholder="例: 2024" /></div>
-          </div>
-          <div><label className="text-[11px] font-bold text-gray-500 ml-1 mb-1 block">メモ</label><textarea name="memo" value={formData.memo || ''} onChange={handleChange} className="w-full p-3.5 bg-gray-50 rounded-xl border border-gray-200 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none transition-all resize-none placeholder:text-gray-400" rows="3" placeholder="着心地やサイズ感など..." /></div>
-        </div>
+        <ItemForm formData={formData} onChange={setFormData} onSeasonsChange={(s) => setFormData({...formData, seasons: s})} customCategories={customCategories} customColors={customColors} idPrefix="edit" />
         <button 
           onClick={() => { 
             if(!formData.name.trim()) return; 
@@ -856,9 +848,10 @@ function DetailView({ item, items, coords, onUpdate, onDispose, customCategories
             <p className="text-sm font-extrabold text-indigo-700">{cpw ? `¥${cpw.toLocaleString()}` : '-'}</p>
           </div>
         </div>
-        <div className="grid grid-cols-3 gap-2 text-center">
+        <div className="grid grid-cols-2 gap-2 text-center">
           <div className="bg-gray-50 border border-gray-100 p-2.5 rounded-2xl"><p className="text-[10px] text-gray-500 font-medium mb-0.5">Color</p><p className="text-sm font-bold text-gray-800">{item.color || '-'}</p></div>
           <div className="bg-gray-50 border border-gray-100 p-2.5 rounded-2xl"><p className="text-[10px] text-gray-500 font-medium mb-0.5">Season</p><p className="text-sm font-bold text-gray-800 truncate">{item.seasons?.join(',') || '-'}</p></div>
+          <div className="bg-gray-50 border border-gray-100 p-2.5 rounded-2xl"><p className="text-[10px] text-gray-500 font-medium mb-0.5">Material</p><p className="text-sm font-bold text-gray-800">{item.material || '-'}</p></div>
           <div className="bg-gray-50 border border-gray-100 p-2.5 rounded-2xl"><p className="text-[10px] text-gray-500 font-medium mb-0.5">Year</p><p className="text-sm font-bold text-gray-800">{item.purchaseYear || '-'}</p></div>
         </div>
 
@@ -1381,49 +1374,106 @@ function StatsView({ activeItems, disposedItems, wearLogs }) {
 }
 
 // ==================== Add View (Camera/AI) ====================
+function SeasonToggle({ seasons, onChange }) {
+  const allSeasons = ['春', '夏', '秋', '冬'];
+  const toggle = (s) => {
+    const current = seasons || [];
+    onChange(current.includes(s) ? current.filter(x => x !== s) : [...current, s]);
+  };
+  return (
+    <div className="flex gap-2">
+      {allSeasons.map(s => (
+        <button key={s} type="button" onClick={() => toggle(s)}
+          className={`flex-1 py-2.5 rounded-xl text-sm font-bold transition-all active:scale-95 ${(seasons || []).includes(s) ? 'bg-blue-600 text-white shadow-sm' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
+          {s}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function ItemForm({ formData, onChange, onSeasonsChange, customCategories, customColors, idPrefix = 'form' }) {
+  const handleChange = (e) => onChange({ ...formData, [e.target.name]: e.target.value });
+  return (
+    <div className="space-y-4">
+      <div><label className="text-[11px] font-bold text-gray-500 ml-1 mb-1 block">名前 <span className="text-red-500">*</span></label><input name="name" value={formData.name || ''} onChange={handleChange} className="w-full p-3.5 bg-gray-50 rounded-xl border border-gray-200 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none transition-shadow placeholder:text-gray-400" placeholder="例: 白いTシャツ" /></div>
+      <div className="grid grid-cols-2 gap-4">
+        <div><label className="text-[11px] font-bold text-gray-500 ml-1 mb-1 block">カテゴリ</label><input name="category" value={formData.category || ''} onChange={handleChange} list={`${idPrefix}-category-list`} className="w-full p-3.5 bg-gray-50 rounded-xl border border-gray-200 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none transition-shadow placeholder:text-gray-400" placeholder="例: トップス" /><datalist id={`${idPrefix}-category-list`}>{customCategories.map(cat => <option key={cat} value={cat} />)}</datalist></div>
+        <div><label className="text-[11px] font-bold text-gray-500 ml-1 mb-1 block">色</label><input name="color" value={formData.color || ''} onChange={handleChange} list={`${idPrefix}-color-list`} className="w-full p-3.5 bg-gray-50 rounded-xl border border-gray-200 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none transition-shadow placeholder:text-gray-400" placeholder="例: ホワイト" /><datalist id={`${idPrefix}-color-list`}>{customColors.map(color => <option key={color} value={color} />)}</datalist></div>
+      </div>
+      <div><label className="text-[11px] font-bold text-gray-500 ml-1 mb-1 block">シーズン</label><SeasonToggle seasons={formData.seasons} onChange={onSeasonsChange} /></div>
+      <div><label className="text-[11px] font-bold text-gray-500 ml-1 mb-1 block">素材</label><input name="material" value={formData.material || ''} onChange={handleChange} className="w-full p-3.5 bg-gray-50 rounded-xl border border-gray-200 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none transition-shadow placeholder:text-gray-400" placeholder="例: コットン100%" /></div>
+      <div><label className="text-[11px] font-bold text-gray-500 ml-1 mb-1 block">ブランド</label><input name="brand" value={formData.brand || ''} onChange={handleChange} className="w-full p-3.5 bg-gray-50 rounded-xl border border-gray-200 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none transition-shadow placeholder:text-gray-400" placeholder="例: UNIQLO" /></div>
+      <div className="grid grid-cols-2 gap-4">
+        <div><label className="text-[11px] font-bold text-gray-500 ml-1 mb-1 block">価格 (円)</label><input type="text" inputMode="numeric" pattern="[0-9]*" name="price" value={formData.price || ''} onChange={handleChange} className="w-full p-3.5 bg-gray-50 rounded-xl border border-gray-200 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none transition-shadow placeholder:text-gray-400" placeholder="例: 3990" /></div>
+        <div><label className="text-[11px] font-bold text-gray-500 ml-1 mb-1 block">購入年</label><input type="text" inputMode="numeric" pattern="[0-9]*" name="purchaseYear" value={formData.purchaseYear || ''} onChange={handleChange} className="w-full p-3.5 bg-gray-50 rounded-xl border border-gray-200 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none transition-shadow placeholder:text-gray-400" placeholder="例: 2024" /></div>
+      </div>
+      <div><label className="text-[11px] font-bold text-gray-500 ml-1 mb-1 block">コーデ提案</label><textarea name="coordinate" value={formData.coordinate || ''} onChange={handleChange} className="w-full p-3.5 bg-gray-50 rounded-xl border border-gray-200 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none transition-shadow resize-none placeholder:text-gray-400" rows="2" placeholder="例: デニムとの相性が良い" /></div>
+      <div><label className="text-[11px] font-bold text-gray-500 ml-1 mb-1 block">お手入れアドバイス</label><textarea name="advice" value={formData.advice || ''} onChange={handleChange} className="w-full p-3.5 bg-gray-50 rounded-xl border border-gray-200 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none transition-shadow resize-none placeholder:text-gray-400" rows="2" placeholder="例: 洗濯ネット使用推奨" /></div>
+      <div><label className="text-[11px] font-bold text-gray-500 ml-1 mb-1 block">メモ</label><textarea name="memo" value={formData.memo || ''} onChange={handleChange} className="w-full p-3.5 bg-gray-50 rounded-xl border border-gray-200 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none transition-shadow resize-none placeholder:text-gray-400" rows="2" placeholder="着心地やサイズ感など..." /></div>
+    </div>
+  );
+}
+
 function AddView({ apiKey, customCategories, customColors, showToast, onSuccess }) {
-  const [file, setFile] = useState(null);
-  const [preview, setPreview] = useState(null);
+  const [files, setFiles] = useState([]);
+  const [previews, setPreviews] = useState([]);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [step, setStep] = useState(1);
+  const [step, setStep] = useState(1); // 1=photo, 2=processing, 3=review
   const [isManual, setIsManual] = useState(!apiKey);
-  const [formData, setFormData] = useState({ name: '', category: '', color: '', brand: '', price: '', purchaseYear: '', memo: '' });
+  const [formData, setFormData] = useState({ name: '', category: '', color: '', brand: '', price: '', purchaseYear: '', memo: '', seasons: [], material: '', coordinate: '', advice: '' });
   const fileInputRef = useRef(null);
   const cameraInputRef = useRef(null);
 
   const handleFileChange = (e) => {
-    const selected = e.target.files?.[0];
-    if (selected) { setFile(selected); setPreview(URL.createObjectURL(selected)); setIsManual(!apiKey); }
+    const selected = Array.from(e.target.files || []);
+    if (selected.length === 0) return;
+    const newFiles = [...files, ...selected];
+    const newPreviews = [...previews, ...selected.map(f => URL.createObjectURL(f))];
+    setFiles(newFiles);
+    setPreviews(newPreviews);
+    setIsManual(!apiKey);
+    e.target.value = '';
+  };
+
+  const removePhoto = (index) => {
+    URL.revokeObjectURL(previews[index]);
+    setFiles(files.filter((_, i) => i !== index));
+    setPreviews(previews.filter((_, i) => i !== index));
   };
 
   const processImage = async () => {
-    if (!file || !apiKey) return;
+    if (files.length === 0 || !apiKey) return;
     setIsProcessing(true); setStep(2);
     try {
-      const compressedBase64 = await compressImage(file);
-      const metadata = await analyzeImageWithGemini(compressedBase64, apiKey, customCategories, customColors);
-      const newItem = { id: crypto.randomUUID(), imageUrl: compressedBase64, createdAt: Date.now(), disposedAt: null, ...metadata };
-      await saveItem(newItem); onSuccess(newItem);
+      const compressedImages = await Promise.all(files.map(f => compressImage(f)));
+      const metadata = await analyzeImageWithGemini(compressedImages, apiKey, customCategories, customColors);
+      setFormData({ ...formData, ...metadata, _compressedImages: compressedImages });
+      setStep(3);
     } catch (err) { showToast(err.message || 'エラーが発生しました', 'error'); setStep(1); } finally { setIsProcessing(false); }
   };
 
-  const handleManualSave = async () => {
+  const handleSave = async () => {
     if (!formData.name.trim()) { showToast('名前を入力してください', 'error'); return; }
     setIsProcessing(true);
     try {
-      const compressedBase64 = await compressImage(file);
-      const newItem = { id: crypto.randomUUID(), imageUrl: compressedBase64, createdAt: Date.now(), disposedAt: null, ...formData, price: formData.price ? Number(String(formData.price).replace(/[^0-9]/g, '')) : null };
+      let imageUrl;
+      if (formData._compressedImages) {
+        imageUrl = formData._compressedImages[0];
+      } else {
+        imageUrl = await compressImage(files[0]);
+      }
+      const { _compressedImages, ...cleanData } = formData;
+      const newItem = { id: crypto.randomUUID(), imageUrl, createdAt: Date.now(), disposedAt: null, ...cleanData, price: cleanData.price ? Number(String(cleanData.price).replace(/[^0-9]/g, '')) : null, seasons: cleanData.seasons || [] };
       await saveItem(newItem); onSuccess(newItem);
     } catch(err) { showToast('保存に失敗しました', 'error'); } finally { setIsProcessing(false); }
   };
-
-  const handleFormChange = (e) => setFormData({ ...formData, [e.target.name]: e.target.value });
 
   return (
     <div className="p-5">
       {step === 1 && (
         <div className="space-y-6">
-          {!preview ? (
+          {previews.length === 0 ? (
             <div className="grid grid-cols-2 gap-4">
               <button onClick={() => cameraInputRef.current?.click()} className="flex flex-col items-center justify-center p-10 bg-white rounded-3xl border border-gray-200 shadow-sm hover:border-blue-400 hover:bg-blue-50 active:scale-95 transition-all text-gray-500 hover:text-blue-600">
                 <Camera size={42} className="mb-3" strokeWidth={1.5} />
@@ -1436,41 +1486,67 @@ function AddView({ apiKey, customCategories, customColors, showToast, onSuccess 
             </div>
           ) : (
             <div className="space-y-5">
-              <div className="relative rounded-3xl overflow-hidden bg-gray-50 aspect-square w-full shadow-md border border-gray-200">
-                <img src={preview} alt="" className="w-full h-full object-contain" />
-                <button onClick={() => { setFile(null); setPreview(null); }} className="absolute top-4 right-4 bg-black/50 hover:bg-black/70 active:scale-95 text-white p-2.5 rounded-full transition-all backdrop-blur-sm" aria-label="画像を削除"><X size={20} /></button>
+              {/* Photo grid - show all selected photos */}
+              <div className={`grid gap-3 ${previews.length === 1 ? 'grid-cols-1' : 'grid-cols-2'}`}>
+                {previews.map((p, i) => (
+                  <div key={i} className="relative rounded-3xl overflow-hidden bg-gray-50 aspect-square w-full shadow-md border border-gray-200">
+                    <img src={p} alt="" className="w-full h-full object-contain" />
+                    <button onClick={() => removePhoto(i)} className="absolute top-3 right-3 bg-black/50 hover:bg-black/70 active:scale-95 text-white p-2 rounded-full transition-all backdrop-blur-sm" aria-label="画像を削除"><X size={16} /></button>
+                    {i === 0 && previews.length > 1 && <span className="absolute top-3 left-3 bg-blue-600 text-white text-[10px] font-bold px-2.5 py-1 rounded-full shadow-sm">メイン</span>}
+                  </div>
+                ))}
+                {/* Add more photos button */}
+                <button onClick={() => fileInputRef.current?.click()} className="flex flex-col items-center justify-center aspect-square bg-white rounded-3xl border-2 border-dashed border-gray-300 hover:border-blue-400 hover:bg-blue-50 active:scale-95 transition-all text-gray-400 hover:text-blue-500">
+                  <Plus size={32} className="mb-1" strokeWidth={1.5} />
+                  <span className="text-[11px] font-bold">写真を追加</span>
+                </button>
               </div>
-              
+              <p className="text-[11px] text-gray-500 text-center">タグやブランドロゴの写真も追加すると、AIの解析精度が上がります</p>
+
               {!isManual ? (
                 <div className="space-y-3 animate-in fade-in slide-in-from-bottom-2">
-                  <button onClick={processImage} disabled={isProcessing} className="w-full py-4 bg-gray-900 text-white rounded-2xl font-bold text-lg shadow-md flex items-center justify-center gap-2 active:scale-95 transition-all disabled:opacity-50"><Sparkles size={20} /> AIで解析して保存</button>
-                  <button onClick={() => setIsManual(true)} className="w-full py-4 bg-white border border-gray-200 text-gray-700 rounded-2xl font-bold shadow-sm flex items-center justify-center gap-2 active:scale-95 transition-all hover:bg-gray-50"><Edit3 size={18} /> 手動で情報を入力して保存</button>
+                  <button onClick={processImage} disabled={isProcessing} className="w-full py-4 bg-gray-900 text-white rounded-2xl font-bold text-lg shadow-md flex items-center justify-center gap-2 active:scale-95 transition-all disabled:opacity-50"><Sparkles size={20} /> AIで解析{previews.length > 1 ? `（${previews.length}枚）` : ''}</button>
+                  <button onClick={() => setIsManual(true)} className="w-full py-4 bg-white border border-gray-200 text-gray-700 rounded-2xl font-bold shadow-sm flex items-center justify-center gap-2 active:scale-95 transition-all hover:bg-gray-50"><Edit3 size={18} /> 手動で情報を入力</button>
                 </div>
               ) : (
                 <div className="bg-white p-6 rounded-3xl border border-gray-200 shadow-sm space-y-5 animate-in fade-in slide-in-from-bottom-2">
                   <h3 className="font-extrabold text-gray-900 border-b border-gray-100 pb-3 text-lg">手動入力</h3>
-                  <div><label className="text-[11px] font-bold text-gray-500 ml-1 mb-1 block">名前 <span className="text-red-500">*</span></label><input name="name" value={formData.name} onChange={handleFormChange} className="w-full p-3.5 bg-gray-50 rounded-xl border border-gray-200 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none transition-shadow placeholder:text-gray-400" placeholder="例: 白いTシャツ" /></div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div><label className="text-[11px] font-bold text-gray-500 ml-1 mb-1 block">カテゴリ</label><input name="category" value={formData.category} onChange={handleFormChange} list="add-category-list" className="w-full p-3.5 bg-gray-50 rounded-xl border border-gray-200 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none transition-shadow placeholder:text-gray-400" placeholder="例: トップス" /><datalist id="add-category-list">{customCategories.map(cat => <option key={cat} value={cat} />)}</datalist></div>
-                    <div><label className="text-[11px] font-bold text-gray-500 ml-1 mb-1 block">色</label><input name="color" value={formData.color} onChange={handleFormChange} list="add-color-list" className="w-full p-3.5 bg-gray-50 rounded-xl border border-gray-200 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none transition-shadow placeholder:text-gray-400" placeholder="例: ホワイト" /><datalist id="add-color-list">{customColors.map(color => <option key={color} value={color} />)}</datalist></div>
-                  </div>
-                  <div><label className="text-[11px] font-bold text-gray-500 ml-1 mb-1 block">ブランド</label><input name="brand" value={formData.brand} onChange={handleFormChange} className="w-full p-3.5 bg-gray-50 rounded-xl border border-gray-200 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none transition-shadow placeholder:text-gray-400" placeholder="例: UNIQLO" /></div>
-                  <div><label className="text-[11px] font-bold text-gray-500 ml-1 mb-1 block">価格 (円)</label><input type="text" inputMode="numeric" pattern="[0-9]*" name="price" value={formData.price} onChange={handleFormChange} className="w-full p-3.5 bg-gray-50 rounded-xl border border-gray-200 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none transition-shadow placeholder:text-gray-400" placeholder="例: 3990" /></div>
-                  
+                  <ItemForm formData={formData} onChange={setFormData} onSeasonsChange={(s) => setFormData({...formData, seasons: s})} customCategories={customCategories} customColors={customColors} idPrefix="add" />
                   <div className="flex gap-3 pt-2">
                     {apiKey && <button onClick={() => setIsManual(false)} className="flex-1 py-3.5 bg-gray-100 text-gray-700 rounded-xl font-bold active:scale-95 transition-all">戻る</button>}
-                    <button onClick={handleManualSave} disabled={isProcessing || !formData.name.trim()} className="flex-[2] py-3.5 bg-gray-900 text-white rounded-xl font-bold active:scale-95 disabled:opacity-50 transition-all flex justify-center items-center gap-1.5 shadow-sm"><Save size={18}/> 保存する</button>
+                    <button onClick={handleSave} disabled={isProcessing || !formData.name.trim()} className="flex-[2] py-3.5 bg-gray-900 text-white rounded-xl font-bold active:scale-95 disabled:opacity-50 transition-all flex justify-center items-center gap-1.5 shadow-sm"><Save size={18}/> 保存する</button>
                   </div>
                 </div>
               )}
             </div>
           )}
           <input type="file" ref={cameraInputRef} accept="image/*" capture="environment" className="hidden" onChange={handleFileChange} />
-          <input type="file" ref={fileInputRef} accept="image/*" className="hidden" onChange={handleFileChange} />
+          <input type="file" ref={fileInputRef} accept="image/*" multiple className="hidden" onChange={handleFileChange} />
         </div>
       )}
       {step === 2 && (
-        <div className="flex flex-col items-center justify-center py-32"><div className="relative w-24 h-24 mb-8"><div className="absolute inset-0 border-4 border-gray-100 rounded-full"></div><div className="absolute inset-0 border-4 border-blue-600 rounded-full border-t-transparent animate-spin"></div><div className="absolute inset-0 flex items-center justify-center text-blue-600"><Sparkles size={32} className="animate-pulse" /></div></div><h3 className="text-xl font-extrabold text-gray-900 mb-2">AIが解析中...</h3><p className="text-sm text-gray-500">色や素材を判定しています</p></div>
+        <div className="flex flex-col items-center justify-center py-32"><div className="relative w-24 h-24 mb-8"><div className="absolute inset-0 border-4 border-gray-100 rounded-full"></div><div className="absolute inset-0 border-4 border-blue-600 rounded-full border-t-transparent animate-spin"></div><div className="absolute inset-0 flex items-center justify-center text-blue-600"><Sparkles size={32} className="animate-pulse" /></div></div><h3 className="text-xl font-extrabold text-gray-900 mb-2">AIが解析中...</h3><p className="text-sm text-gray-500">{files.length > 1 ? `${files.length}枚の写真を解析しています` : '色や素材を判定しています'}</p></div>
+      )}
+      {step === 3 && (
+        <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
+          <div className="flex items-center gap-2 text-emerald-600 bg-emerald-50 p-3.5 rounded-2xl border border-emerald-100">
+            <CheckCircle2 size={20} />
+            <span className="text-sm font-bold">AI解析が完了しました。内容を確認・修正して保存してください。</span>
+          </div>
+
+          {/* Thumbnail of main image */}
+          <div className="flex gap-3 overflow-x-auto pb-1 scrollbar-hide">
+            {previews.map((p, i) => (
+              <img key={i} src={p} alt="" className={`w-20 h-20 rounded-2xl object-cover border-2 shadow-sm shrink-0 ${i === 0 ? 'border-blue-500' : 'border-gray-200'}`} />
+            ))}
+          </div>
+
+          <div className="bg-white p-6 rounded-3xl border border-gray-200 shadow-sm space-y-5">
+            <h3 className="font-extrabold text-gray-900 border-b border-gray-100 pb-3 text-lg flex items-center gap-2"><Sparkles size={18} className="text-blue-600"/> AI解析結果</h3>
+            <ItemForm formData={formData} onChange={setFormData} onSeasonsChange={(s) => setFormData({...formData, seasons: s})} customCategories={customCategories} customColors={customColors} idPrefix="ai-review" />
+            <button onClick={handleSave} disabled={isProcessing || !formData.name.trim()} className="w-full py-4 bg-gray-900 text-white rounded-2xl font-bold active:scale-95 disabled:opacity-50 transition-all flex justify-center items-center gap-2 shadow-md"><Save size={20}/> 保存する</button>
+          </div>
+        </div>
       )}
     </div>
   );
