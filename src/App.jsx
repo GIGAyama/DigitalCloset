@@ -594,8 +594,6 @@ function ClosetView({ items, isLoading, onItemClick, onOpenAiStylist }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [isFilterOpen, setIsFilterOpen] = useState(false);
 
-  if (isLoading) return <div className="flex justify-center py-20"><Loader2 className="animate-spin text-gray-300" size={32} /></div>;
-
   const categories = ['すべて', ...new Set(items.map(item => item.category).filter(Boolean))];
   const colors = ['すべて', ...new Set(items.map(item => item.color).filter(Boolean))];
   const seasons = ['すべて', '春', '夏', '秋', '冬'];
@@ -626,6 +624,8 @@ function ClosetView({ items, isLoading, onItemClick, onOpenAiStylist }) {
   }, [items, searchQuery, filterCategory, filterColor, filterSeason, filterYear, sortOption]);
 
   const activeFiltersCount = (filterCategory !== 'すべて' ? 1 : 0) + (filterColor !== 'すべて' ? 1 : 0) + (filterSeason !== 'すべて' ? 1 : 0) + (filterYear !== 'すべて' ? 1 : 0);
+
+  if (isLoading) return <div className="flex justify-center py-20"><Loader2 className="animate-spin text-gray-300" size={32} /></div>;
 
   return (
     <div className="p-4">
