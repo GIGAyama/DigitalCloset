@@ -59,6 +59,19 @@ const deleteCoord = (id) => dbOp(STORE_COORDS, 'readwrite', store => store.delet
 // ============================================================================
 // 2. Image Processing & Gemini API Utils
 // ============================================================================
+const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash';
+const LS_KEY_GEMINI_MODEL = 'giga_closet_gemini_model';
+
+const getGeminiModel = () => localStorage.getItem(LS_KEY_GEMINI_MODEL) || DEFAULT_GEMINI_MODEL;
+
+const fetchAvailableGeminiModels = async (apiKey) => {
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
+  if (!response.ok) throw new Error(`モデル一覧の取得に失敗しました: ${response.status}`);
+  const data = await response.json();
+  return (data.models || [])
+    .filter(m => m.supportedGenerationMethods?.includes('generateContent'))
+    .map(m => ({ id: m.name.replace('models/', ''), displayName: m.displayName || m.name.replace('models/', '') }));
+};
 const compressImage = (file, maxSide = 800, quality = 0.7) => {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -87,7 +100,8 @@ const compressImage = (file, maxSide = 800, quality = 0.7) => {
 };
 
 const analyzeImageWithGemini = async (base64DataArray, apiKey, customCategories, customColors) => {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+  const model = getGeminiModel();
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
   // Support both single string and array of base64 images
   const images = Array.isArray(base64DataArray) ? base64DataArray : [base64DataArray];
   
@@ -157,7 +171,8 @@ const analyzeImageWithGemini = async (base64DataArray, apiKey, customCategories,
 };
 
 const askGeminiChat = async (question, imageBase64, chatHistory, items, coords, apiKey) => {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+  const model = getGeminiModel();
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
   const wardrobe = items.map(i => `- ${i.name} (${i.category}, ${i.color}, ${i.seasons?.join('/')})`).join('\n');
   const favCoords = coords.filter(c => c.rating >= 4).map(c => `- ` + c.itemIds.map(id => items.find(i=>i.id===id)?.name).filter(Boolean).join(' と ')).join('\n');
 
@@ -202,7 +217,8 @@ ${favCoords || 'まだありません'}`;
 };
 
 const askGeminiStylist = async (baseItem, requestText, items, apiKey) => {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+  const model = getGeminiModel();
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
   const wardrobe = items.map(i => `ID:${i.id}, ${i.name} (${i.category}, ${i.color}, ${i.seasons?.join('/')})`).join('\n');
   const schema = {
     type: "OBJECT",
@@ -233,7 +249,8 @@ const askGeminiStylist = async (baseItem, requestText, items, apiKey) => {
 };
 
 const askGeminiStopper = async (imageBase64, items, apiKey) => {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+  const model = getGeminiModel();
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
   const wardrobe = items.map(i => `- ${i.name} (${i.category}, ${i.color})`).join('\n');
   
   const prompt = `あなたは辛口で優秀なファッションコンサルタントです。
@@ -265,7 +282,8 @@ ${wardrobe || 'アイテムなし'}`;
 };
 
 const askGeminiReverseLookup = async (imageBase64, items, apiKey) => {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+  const model = getGeminiModel();
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
   const wardrobe = items.map(i => `ID:${i.id}, ${i.name} (${i.category}, ${i.color})`).join('\n');
   
   const schema = {
@@ -366,6 +384,7 @@ export default function App() {
     const saved = localStorage.getItem('giga_closet_custom_colors');
     return saved ? JSON.parse(saved) : ['ホワイト', 'ブラック', 'グレー', 'ネイビー', 'ブルー', 'ブラウン', 'ベージュ', 'レッド', 'グリーン', 'イエロー', 'その他'];
   });
+  const [geminiModel, setGeminiModel] = useState(() => localStorage.getItem(LS_KEY_GEMINI_MODEL) || DEFAULT_GEMINI_MODEL);
 
   const [toast, setToast] = useState({ show: false, message: '', type: 'info' });
   const [isLoading, setIsLoading] = useState(true);
@@ -482,11 +501,12 @@ export default function App() {
                 <StatsView activeItems={activeItems} disposedItems={disposedItems} wearLogs={wearLogs} />
               )}
               {activeTab === 'settings' && (
-                <SettingsView 
-                  apiKey={apiKey} setApiKey={setApiKey} 
+                <SettingsView
+                  apiKey={apiKey} setApiKey={setApiKey}
+                  geminiModel={geminiModel} setGeminiModel={setGeminiModel}
                   customCategories={customCategories} setCustomCategories={setCustomCategories}
                   customColors={customColors} setCustomColors={setCustomColors}
-                  showToast={showToast} onDataImported={loadData} onOpenDisposed={() => setActiveView('disposed')} 
+                  showToast={showToast} onDataImported={loadData} onOpenDisposed={() => setActiveView('disposed')}
                 />
               )}
             </div>
@@ -533,9 +553,9 @@ export default function App() {
 
           {activeView === 'detail' && selectedItem && (
             <div className="animate-in slide-in-from-right-4 fade-in duration-300 h-full pb-6">
-              <DetailView 
+              <DetailView
                 item={selectedItem} items={activeItems} coords={coords} customCategories={customCategories} customColors={customColors} showToast={showToast}
-                wearLogs={wearLogs}
+                wearLogs={wearLogs} apiKey={apiKey}
                 onUpdate={async (updatedItem) => {
                   await saveItem(updatedItem);
                   setItems(items.map(i => i.id === updatedItem.id ? updatedItem : i));
@@ -766,11 +786,15 @@ function ClosetView({ items, isLoading, onItemClick, onOpenAiStylist }) {
 }
 
 // ==================== Detail & Edit View ====================
-function DetailView({ item, items, coords, onUpdate, onDispose, customCategories, customColors, showToast, wearLogs }) {
+function DetailView({ item, items, coords, onUpdate, onDispose, customCategories, customColors, showToast, wearLogs, apiKey }) {
   const [isEditing, setIsEditing] = useState(false);
   const [formData, setFormData] = useState({ ...item });
   const [confirmDispose, setConfirmDispose] = useState(false);
+  const [aiAnalysisFiles, setAiAnalysisFiles] = useState([]);
+  const [aiAnalysisPreviews, setAiAnalysisPreviews] = useState([]);
+  const [isAiProcessing, setIsAiProcessing] = useState(false);
   const fileInputRef = useRef(null);
+  const aiFileInputRef = useRef(null);
 
   const wearCount = wearLogs ? wearLogs.filter(log => log.itemId === item.id).length : 0;
   const cpw = item.price ? Math.floor(item.price / Math.max(wearCount, 1)) : null;
@@ -791,12 +815,60 @@ function DetailView({ item, items, coords, onUpdate, onDispose, customCategories
     e.target.value = '';
   };
 
+  const handleAiFileChange = (e) => {
+    const selected = Array.from(e.target.files || []);
+    if (selected.length === 0) return;
+    setAiAnalysisFiles(prev => [...prev, ...selected]);
+    setAiAnalysisPreviews(prev => [...prev, ...selected.map(f => URL.createObjectURL(f))]);
+    e.target.value = '';
+  };
+
+  const removeAiPhoto = (index) => {
+    URL.revokeObjectURL(aiAnalysisPreviews[index]);
+    setAiAnalysisFiles(prev => prev.filter((_, i) => i !== index));
+    setAiAnalysisPreviews(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const runAiAnalysis = async () => {
+    // Use uploaded AI photos if available, otherwise use the current item image
+    const hasAiPhotos = aiAnalysisFiles.length > 0;
+    if (!hasAiPhotos && !formData.imageUrl) return;
+    if (!apiKey) { showToast('設定からAPIキーを登録してください', 'error'); return; }
+
+    setIsAiProcessing(true);
+    try {
+      let images;
+      if (hasAiPhotos) {
+        images = await Promise.all(aiAnalysisFiles.map(f => compressImage(f)));
+      } else {
+        images = [formData.imageUrl];
+      }
+      const metadata = await analyzeImageWithGemini(images, apiKey, customCategories, customColors);
+      // Update main image if new photos were provided
+      if (hasAiPhotos) {
+        const mainImage = await compressImage(aiAnalysisFiles[0]);
+        setFormData(prev => ({ ...prev, ...metadata, imageUrl: mainImage }));
+      } else {
+        setFormData(prev => ({ ...prev, ...metadata }));
+      }
+      // Clean up AI analysis photos
+      aiAnalysisPreviews.forEach(p => URL.revokeObjectURL(p));
+      setAiAnalysisFiles([]);
+      setAiAnalysisPreviews([]);
+      showToast('AI解析が完了しました', 'success');
+    } catch (err) {
+      showToast(err.message || 'AI解析に失敗しました', 'error');
+    } finally {
+      setIsAiProcessing(false);
+    }
+  };
+
   if (isEditing) {
     return (
       <div className="p-5 space-y-5 bg-white min-h-full animate-in fade-in">
         <div className="flex justify-between items-center mb-2">
           <h3 className="font-bold text-xl text-gray-900">アイテムの編集</h3>
-          <button onClick={() => setIsEditing(false)} className="text-gray-400 hover:text-gray-600 hover:bg-gray-100 p-2 rounded-full transition-colors active:scale-95" aria-label="閉じる"><X size={24}/></button>
+          <button onClick={() => { setIsEditing(false); aiAnalysisPreviews.forEach(p => URL.revokeObjectURL(p)); setAiAnalysisFiles([]); setAiAnalysisPreviews([]); }} className="text-gray-400 hover:text-gray-600 hover:bg-gray-100 p-2 rounded-full transition-colors active:scale-95" aria-label="閉じる"><X size={24}/></button>
         </div>
 
         <div className="flex flex-col items-center gap-4 mb-6">
@@ -811,14 +883,52 @@ function DetailView({ item, items, coords, onUpdate, onDispose, customCategories
           <input type="file" ref={fileInputRef} accept="image/*" className="hidden" onChange={handleImageChange} />
         </div>
 
+        {/* AI Re-analysis Section */}
+        {apiKey && (
+          <div className="bg-gradient-to-br from-blue-50 to-indigo-50 p-5 rounded-3xl border border-blue-100 shadow-sm space-y-4">
+            <h4 className="font-bold text-blue-900 text-sm flex items-center gap-1.5"><Sparkles size={16} className="text-blue-600"/> AIで情報を再解析</h4>
+            <p className="text-[11px] text-blue-700/70 leading-relaxed">新しい写真を追加するとより正確に解析できます。写真なしの場合は現在の画像で解析します。</p>
+
+            {aiAnalysisPreviews.length > 0 && (
+              <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
+                {aiAnalysisPreviews.map((p, i) => (
+                  <div key={i} className="relative shrink-0">
+                    <img src={p} alt="" className="w-16 h-16 rounded-xl object-cover border border-blue-200 shadow-sm" />
+                    <button onClick={() => removeAiPhoto(i)} className="absolute -top-1.5 -right-1.5 bg-red-500 text-white p-0.5 rounded-full shadow-sm" aria-label="削除"><X size={12} /></button>
+                  </div>
+                ))}
+                <button onClick={() => aiFileInputRef.current?.click()} className="w-16 h-16 rounded-xl border-2 border-dashed border-blue-300 flex items-center justify-center text-blue-400 hover:bg-blue-100 active:scale-95 transition-all shrink-0">
+                  <Plus size={20} />
+                </button>
+              </div>
+            )}
+
+            <div className="flex gap-2">
+              {aiAnalysisPreviews.length === 0 && (
+                <button onClick={() => aiFileInputRef.current?.click()} className="flex-1 py-3 bg-white text-blue-700 rounded-xl font-bold text-xs border border-blue-200 flex items-center justify-center gap-1.5 active:scale-95 transition-all shadow-sm hover:bg-blue-50">
+                  <ImagePlus size={16} /> 写真を追加
+                </button>
+              )}
+              <button
+                onClick={runAiAnalysis}
+                disabled={isAiProcessing}
+                className="flex-1 py-3 bg-gray-900 text-white rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 active:scale-95 transition-all disabled:opacity-50 shadow-sm"
+              >
+                {isAiProcessing ? <><Loader2 size={16} className="animate-spin" /> 解析中...</> : <><Sparkles size={16} /> AIで解析{aiAnalysisPreviews.length > 0 ? `（${aiAnalysisPreviews.length}枚）` : '（現在の画像）'}</>}
+              </button>
+            </div>
+            <input type="file" ref={aiFileInputRef} accept="image/*" multiple className="hidden" onChange={handleAiFileChange} />
+          </div>
+        )}
+
         <ItemForm formData={formData} onChange={setFormData} onSeasonsChange={(s) => setFormData({...formData, seasons: s})} customCategories={customCategories} customColors={customColors} idPrefix="edit" />
-        <button 
-          onClick={() => { 
-            if(!formData.name.trim()) return; 
+        <button
+          onClick={() => {
+            if(!formData.name.trim()) return;
             const finalData = { ...formData, price: formData.price ? Number(String(formData.price).replace(/[^0-9]/g, '')) : null };
-            onUpdate(finalData); 
-            setIsEditing(false); 
-          }} 
+            onUpdate(finalData);
+            setIsEditing(false);
+          }}
           disabled={!formData.name.trim()}
           className="w-full py-4 mt-8 bg-gray-900 text-white rounded-2xl font-bold flex justify-center items-center gap-2 active:scale-[0.98] transition-all disabled:opacity-50 disabled:active:scale-100 shadow-md"
         >
@@ -1553,7 +1663,7 @@ function AddView({ apiKey, customCategories, customColors, showToast, onSuccess 
 }
 
 // ==================== Settings View ====================
-function SettingsView({ apiKey, setApiKey, customCategories, setCustomCategories, customColors, setCustomColors, showToast, onDataImported, onOpenDisposed }) {
+function SettingsView({ apiKey, setApiKey, geminiModel, setGeminiModel, customCategories, setCustomCategories, customColors, setCustomColors, showToast, onDataImported, onOpenDisposed }) {
   const [localKey, setLocalKey] = useState(apiKey);
   const [isExporting, setIsExporting] = useState(false);
   const [isEditingCategories, setIsEditingCategories] = useState(false);
@@ -1562,9 +1672,32 @@ function SettingsView({ apiKey, setApiKey, customCategories, setCustomCategories
   const [colorsText, setColorsText] = useState(customColors.join(', '));
   const [confirmImport, setConfirmImport] = useState(false);
   const [importFiles, setImportFiles] = useState(null);
+  const [availableModels, setAvailableModels] = useState([]);
+  const [isLoadingModels, setIsLoadingModels] = useState(false);
   const fileInputRef = useRef(null);
 
   const handleSaveKey = () => { localStorage.setItem('giga_closet_api_key', localKey); setApiKey(localKey); showToast('保存しました', 'success'); };
+
+  const handleFetchModels = async () => {
+    const key = localKey || apiKey;
+    if (!key) { showToast('APIキーを先に入力してください', 'error'); return; }
+    setIsLoadingModels(true);
+    try {
+      const models = await fetchAvailableGeminiModels(key);
+      setAvailableModels(models);
+      if (models.length === 0) showToast('利用可能なモデルが見つかりません', 'error');
+    } catch (err) {
+      showToast(err.message || 'モデル一覧の取得に失敗しました', 'error');
+    } finally {
+      setIsLoadingModels(false);
+    }
+  };
+
+  const handleSaveModel = (modelId) => {
+    localStorage.setItem(LS_KEY_GEMINI_MODEL, modelId);
+    setGeminiModel(modelId);
+    showToast(`モデルを「${modelId}」に変更しました`, 'success');
+  };
 
   const handleSaveCategories = () => {
     const newCategories = categoriesText.split(',').map(s => s.trim()).filter(Boolean);
@@ -1621,6 +1754,36 @@ function SettingsView({ apiKey, setApiKey, customCategories, setCustomCategories
         <h3 className="font-bold mb-3 flex items-center gap-2 text-gray-800"><Settings size={18} className="text-gray-400"/> Gemini APIキー</h3>
         <input type="password" value={localKey} onChange={(e) => setLocalKey(e.target.value)} placeholder="AIzaSy..." className="w-full px-4 py-3.5 bg-gray-50 border border-gray-200 rounded-xl mb-3 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500" />
         <button onClick={handleSaveKey} className="w-full py-3.5 bg-gray-900 text-white rounded-xl font-bold text-sm hover:bg-gray-800 active:scale-95 transition-all shadow-sm">保存する</button>
+      </section>
+
+      <section className="bg-white p-5 rounded-3xl border border-gray-100 shadow-sm">
+        <h3 className="font-bold mb-3 flex items-center gap-2 text-gray-800"><Sparkles size={18} className="text-purple-500"/> AIモデル</h3>
+        <p className="text-[11px] text-gray-500 mb-3 leading-relaxed">使用するGeminiモデルを選択できます。「モデル一覧を取得」で最新のモデルを取得してください。</p>
+        <div className="flex items-center gap-2 mb-3">
+          <div className="flex-1 px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm font-mono text-gray-700 truncate">{geminiModel}</div>
+          <button onClick={handleFetchModels} disabled={isLoadingModels} className="shrink-0 px-4 py-3 bg-gray-900 text-white rounded-xl font-bold text-xs active:scale-95 transition-all disabled:opacity-50 shadow-sm flex items-center gap-1.5">
+            {isLoadingModels ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />}
+            取得
+          </button>
+        </div>
+        {availableModels.length > 0 && (
+          <div className="max-h-48 overflow-y-auto space-y-1.5 bg-gray-50 border border-gray-200 rounded-xl p-2">
+            {availableModels.map(m => (
+              <button
+                key={m.id}
+                onClick={() => handleSaveModel(m.id)}
+                className={`w-full text-left px-3 py-2.5 rounded-lg text-xs font-medium transition-all active:scale-[0.98] ${
+                  m.id === geminiModel
+                    ? 'bg-blue-600 text-white shadow-sm'
+                    : 'bg-white text-gray-700 hover:bg-blue-50 border border-gray-100 shadow-sm'
+                }`}
+              >
+                <span className="font-bold">{m.id}</span>
+                {m.displayName !== m.id && <span className="text-[10px] ml-1.5 opacity-70">({m.displayName})</span>}
+              </button>
+            ))}
+          </div>
+        )}
       </section>
 
       <section className="bg-white p-5 rounded-3xl border border-gray-100 shadow-sm space-y-5">
