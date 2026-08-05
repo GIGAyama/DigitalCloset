@@ -1,0 +1,19 @@
+version: 2
+updates:
+  # 依存の更新は月1回にまとめる。
+  # 週次にすると PR が溜まり、結局まとめて無検証でマージすることになる。
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    open-pull-requests-limit: 5
+    # メジャー更新は自動で上げない（GIGA Standard v5 絶対安全規則 6）。
+    # React 18→19 のような更新は、実際に動かして確かめてから人間が判断する。
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"

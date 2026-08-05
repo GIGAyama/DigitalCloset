@@ -1,0 +1,25 @@
+{
+  "name": "デジタルワードローブ",
+  "short_name": "ワードローブ",
+  "description": "手持ちの服を写真で登録し、コーデ・着用記録・使用頻度をまとめて見渡せる、あなただけのクローゼット帳です。",
+  "lang": "ja",
+  "dir": "ltr",
+
+  "id": "/DigitalCloset/",
+  "start_url": "/DigitalCloset/",
+  "scope": "/DigitalCloset/",
+
+  "display": "standalone",
+  "display_override": ["standalone", "fullscreen", "minimal-ui"],
+  "launch_handler": { "client_mode": ["navigate-existing", "auto"] },
+  "orientation": "any",
+  "background_color": "#f9fafb",
+  "theme_color": "#1d4ed8",
+  "categories": ["lifestyle", "utilities", "productivity"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

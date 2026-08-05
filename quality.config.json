@@ -1,0 +1,27 @@
+{
+  "$comment": "GIGA Standard v5 品質ゲートの設定。scripts/check-project.mjs が読む。",
+  "repoName": "DigitalCloset",
+  "type": "B",
+  "limits": {
+    "maxFileLines": 5000,
+    "maxFileBytes": 409600,
+    "maxInitialJsBytes": 307200,
+    "maxTotalAssetBytes": 1048576,
+    "maxPhotoBytes": 153600,
+    "maxPwaIcon512Bytes": 61440,
+    "maxFaviconBytes": 30720
+  },
+  "generated": [
+    "dist/**",
+    "public/icons/**",
+    "public/favicon.png"
+  ],
+  "notApplicable": {
+    "presentationMode": "一斉授業で使うアプリではない（個人が自分の持ち物を管理する道具）",
+    "printCss": "印刷して配る使い方をしない。必要になったら §2-12 を入れる",
+    "ruby": "児童向けではないため、ふりがなを振る画面が無い",
+    "studyLog": "学習系アプリではないため study.v1 の対象外",
+    "gasGuards": "サーバーを持たない。データは端末内の IndexedDB のみ",
+    "sri": "外部から読み込む実行コードが 0 バイトのため対象が無い"
+  }
+}

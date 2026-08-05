@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { onUpdateAvailable, isStandalone, isIos } from './pwa.js';
 import { 
   Camera, ImagePlus, Settings, X, Download, Upload, 
   ChevronLeft, Trash2, Info, Loader2, Sparkles, 
   Shirt, CheckCircle2, AlertCircle, CalendarDays, 
   Archive, Plus, Edit3, Save, RotateCcw, Search,
   ChevronRight, BarChart3, Layers, Star, MessageCircle,
-  Tags, Palette, Filter
+  Tags, Palette, Filter, RefreshCw, Smartphone
 } from 'lucide-react';
 
 // ============================================================================
@@ -323,38 +324,81 @@ ${wardrobe || 'アイテムなし'}`;
 // ============================================================================
 // 3. UI Components (商用レベルの共通UI)
 // ============================================================================
-function FadeImage({ src, alt, className }) {
+function FadeImage({ src, alt, className, width = 400, height = 400 }) {
   const [isLoaded, setIsLoaded] = useState(false);
   return (
     <div className={`relative overflow-hidden bg-gray-100 ${className}`}>
       {!isLoaded && (
         <div className="absolute inset-0 flex items-center justify-center">
-          <Loader2 className="animate-spin text-gray-300" size={20} />
+          <Loader2 className="animate-spin text-gray-400" size={20} aria-hidden="true" />
         </div>
       )}
       <img
         src={src}
         alt={alt || ''}
+        // width/height は「読み込み前に場所を取っておく」ための比。
+        // 実寸は CSS 側（w-full h-full）で決まる。書いておかないと
+        // 写真が届いた瞬間に一覧がガタつく（CLS）。
+        width={width}
+        height={height}
         className={`w-full h-full object-cover transition-opacity duration-500 ease-out ${isLoaded ? 'opacity-100' : 'opacity-0'}`}
         onLoad={() => setIsLoaded(true)}
         loading="lazy"
+        decoding="async"
       />
     </div>
   );
 }
 
 function ConfirmModal({ isOpen, title, message, confirmText, cancelText, onConfirm, onCancel, isDestructive }) {
+  const panelRef = useRef(null);
+  const titleId = useRef(`dlg-${Math.random().toString(36).slice(2)}`).current;
+
+  // Esc で閉じる／フォーカスを閉じ込める（§4）。
+  // 「削除しますか」を出しておいて Esc も Tab も効かないと、
+  // キーボードだけで操作している人はこの画面から出られなくなる。
+  useEffect(() => {
+    if (!isOpen) return;
+    const prevFocus = document.activeElement;
+    // 開いたら「キャンセル」側へ寄せる。取り消しのほうが安全な既定なので。
+    panelRef.current?.querySelector('button')?.focus();
+
+    const onKey = (e) => {
+      if (e.key === 'Escape') { e.preventDefault(); onCancel?.(); return; }
+      if (e.key !== 'Tab') return;
+      const targets = panelRef.current?.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+      if (!targets || !targets.length) return;
+      const first = targets[0], last = targets[targets.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      if (prevFocus instanceof HTMLElement) prevFocus.focus();
+    };
+  }, [isOpen, onCancel]);
+
   if (!isOpen) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center px-4 bg-black/40 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="bg-white rounded-3xl w-full max-w-sm p-6 shadow-2xl animate-in zoom-in-95 duration-200">
-        <h3 className="text-lg font-bold text-gray-900 mb-2">{title}</h3>
+      <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        className="bg-white rounded-3xl w-full max-w-sm p-6 shadow-2xl animate-in zoom-in-95 duration-200 fc-outline"
+      >
+        <h3 id={titleId} className="text-lg font-bold text-gray-900 mb-2">{title}</h3>
         <p className="text-sm text-gray-600 mb-6 whitespace-pre-wrap leading-relaxed">{message}</p>
         <div className="flex gap-3">
-          <button onClick={onCancel} className="flex-1 py-3.5 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200 active:scale-95 transition-all focus:outline-none focus:ring-2 focus:ring-gray-300">
+          <button onClick={onCancel} className="flex-1 py-3.5 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200 active:scale-95 transition-all focus:outline-none focus:ring-2 focus:ring-gray-500">
             {cancelText || 'キャンセル'}
           </button>
-          <button onClick={onConfirm} className={`flex-1 py-3.5 font-bold rounded-xl text-white active:scale-95 transition-all shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-1 ${isDestructive ? 'bg-red-500 hover:bg-red-600 focus:ring-red-500' : 'bg-blue-600 hover:bg-blue-700 focus:ring-blue-500'}`}>
+          {/* bg-red-500 の上の白文字は比 3.76 で基準未満だった。
+              いちばん取り返しのつかない操作の文字がいちばん読みにくい形になる。
+              色相は変えず red-700 へ濃くした（比 6.28）。 */}
+          <button onClick={onConfirm} className={`flex-1 py-3.5 font-bold rounded-xl text-white active:scale-95 transition-all shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-1 ${isDestructive ? 'bg-red-700 hover:bg-red-800 focus:ring-red-700' : 'bg-blue-700 hover:bg-blue-800 focus:ring-blue-700'}`}>
             {confirmText || 'OK'}
           </button>
         </div>
@@ -388,8 +432,31 @@ export default function App() {
 
   const [toast, setToast] = useState({ show: false, message: '', type: 'info' });
   const [isLoading, setIsLoading] = useState(true);
+  // 新しい版が待機中のときだけ入る「切り替える関数」。null なら案内を出さない。
+  const [updateReady, setUpdateReady] = useState(null);
 
   useEffect(() => { loadData(); }, []);
+
+  // 新しい版の案内を受け取る。切り替えるかどうかは利用者が押して決める（§3-3）。
+  useEffect(() => onUpdateAvailable((apply) => setUpdateReady(() => apply)), []);
+
+  // Chromebook はメモリ不足でタブを黙って破棄する（§3-5）。
+  // このアプリの本体は IndexedDB へ都度書いているので消えないが、
+  // 設定画面で打ちかけの API キーやモデルの選択は state にしか無い。
+  // 画面が閉じられる合図で確定させる。
+  // beforeunload ではなく pagehide なのは、iOS Safari が
+  // beforeunload を飛ばさないことがあるため。
+  useEffect(() => {
+    const flush = () => {
+      try {
+        localStorage.setItem(LS_KEY_GEMINI_MODEL, geminiModel);
+        localStorage.setItem('giga_closet_custom_categories', JSON.stringify(customCategories));
+        localStorage.setItem('giga_closet_custom_colors', JSON.stringify(customColors));
+      } catch { /* 保存領域がいっぱいでも、画面を閉じる邪魔はしない */ }
+    };
+    window.addEventListener('pagehide', flush);
+    return () => window.removeEventListener('pagehide', flush);
+  }, [geminiModel, customCategories, customColors]);
 
   const loadData = async () => {
     setIsLoading(true);
@@ -416,14 +483,43 @@ export default function App() {
   const disposedItems = useMemo(() => items.filter(i => i.disposedAt), [items]);
 
   return (
-    <div className="h-[100dvh] w-full bg-gray-50 text-gray-800 font-sans selection:bg-blue-200 flex justify-center overflow-hidden overscroll-none">
-      {/* Toast */}
+    // app-shell は 100dvh と左右のセーフエリアを持つ（index.css）。
+    // 100vh を直接書かないのは、モバイルのアドレスバー分だけはみ出すため。
+    <div className="app-shell w-full bg-gray-50 text-gray-800 font-sans selection:bg-blue-200 flex justify-center overflow-hidden overscroll-none">
+      {/* Toast
+          面の色は「白抜きの文字が 4.5:1 に届く濃さ」で選んである。
+          bg-red-500(#ef4444) は 3.76、bg-emerald-500(#10b981) は 2.54 しかなく、
+          いちばん急いで読んでほしいエラー文がいちばん読みにくい形になっていた。
+          読み上げのために、状態の知らせは aria-live、エラーは role="alert" で渡す。 */}
       {toast.show && (
         <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 animate-in fade-in slide-in-from-top-5 w-[90%] max-w-sm pointer-events-none">
-          <div className={`flex items-start gap-3 px-5 py-4 rounded-2xl shadow-xl text-sm font-medium text-white
-            ${toast.type === 'error' ? 'bg-red-500' : toast.type === 'success' ? 'bg-emerald-500' : 'bg-gray-800'}`}>
-            {toast.type === 'error' ? <AlertCircle size={20} className="shrink-0 mt-0.5" /> : <CheckCircle2 size={20} className="shrink-0 mt-0.5" />}
+          <div
+            role={toast.type === 'error' ? 'alert' : 'status'}
+            aria-live={toast.type === 'error' ? 'assertive' : 'polite'}
+            className={`flex items-start gap-3 px-5 py-4 rounded-2xl shadow-xl text-sm font-medium text-white fc-outline
+            ${toast.type === 'error' ? 'bg-red-700' : toast.type === 'success' ? 'bg-emerald-700' : 'bg-gray-800'}`}>
+            {toast.type === 'error'
+              ? <AlertCircle size={20} className="shrink-0 mt-0.5" aria-hidden="true" />
+              : <CheckCircle2 size={20} className="shrink-0 mt-0.5" aria-hidden="true" />}
             <p className="break-words leading-relaxed">{toast.message}</p>
+          </div>
+        </div>
+      )}
+
+      {/* 新しい版の案内（§3-3）。
+          押されるまで切り替えない。服の登録や AI との相談の途中で画面が
+          入れ替わると、打ちかけの入力が消えるため。 */}
+      {updateReady && (
+        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 animate-in fade-in slide-in-from-bottom-4 w-[90%] max-w-sm">
+          <div role="status" className="flex items-center gap-3 px-4 py-3 rounded-2xl shadow-xl bg-gray-900 text-white fc-outline">
+            <RefreshCw size={18} className="shrink-0" aria-hidden="true" />
+            <p className="text-sm font-medium flex-1">あたらしい版があります</p>
+            <button
+              onClick={() => { setUpdateReady(null); updateReady(); }}
+              className="tap-44 shrink-0 px-3 py-2 rounded-xl bg-white text-gray-900 text-xs font-bold hover:bg-gray-100 active:scale-95 transition-all"
+            >
+              <span>さいしんに する</span>
+            </button>
           </div>
         </div>
       )}
@@ -434,12 +530,12 @@ export default function App() {
         <header className="shrink-0 px-5 py-3.5 flex items-center justify-between border-b border-gray-100 bg-white/90 backdrop-blur-md z-30">
           <div className="flex items-center gap-3">
             {activeView !== 'main' ? (
-              <button 
-                onClick={() => setActiveView('main')} 
-                className="p-2 -ml-2 rounded-full hover:bg-gray-100 active:bg-gray-200 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-100"
+              <button
+                onClick={() => setActiveView('main')}
+                className="tap-44 p-2 -ml-2 rounded-full hover:bg-gray-100 active:bg-gray-200 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-700"
                 aria-label="戻る"
               >
-                <ChevronLeft size={24} />
+                <ChevronLeft size={24} aria-hidden="true" />
               </button>
             ) : (
               <div className="bg-blue-600 p-1.5 rounded-xl shadow-sm shadow-blue-200">
@@ -457,24 +553,24 @@ export default function App() {
                   if (!apiKey) { showToast('設定からAPIキーを登録してください', 'error'); setActiveTab('settings'); return; }
                   setActiveView('chat');
                 }}
-                className="p-2.5 rounded-full hover:bg-gray-100 active:bg-gray-200 text-gray-600 transition-all active:scale-95 focus:outline-none"
+                className="tap-44 p-2.5 rounded-full hover:bg-gray-100 active:bg-gray-200 text-gray-600 transition-all active:scale-95 focus:outline-none"
                 aria-label="AI相談室を開く"
               >
-                <MessageCircle size={22} />
+                <MessageCircle size={22} aria-hidden="true" />
               </button>
-              <button 
+              <button
                 onClick={() => setActiveView('add')}
-                className="p-2.5 rounded-full bg-gray-900 text-white hover:bg-gray-800 active:bg-gray-700 transition-all shadow-sm active:scale-95 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-900"
+                className="tap-44 p-2.5 rounded-full bg-gray-900 text-white hover:bg-gray-800 active:bg-gray-700 transition-all shadow-sm active:scale-95 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-900"
                 aria-label="アイテムを追加する"
               >
-                <Plus size={22} />
+                <Plus size={22} aria-hidden="true" />
               </button>
             </div>
           )}
         </header>
 
         {/* Content Area */}
-        <main className="flex-1 overflow-y-auto relative bg-gray-50/50 overscroll-y-contain">
+        <main className="scroll-area flex-1 overflow-y-auto relative bg-gray-50/50 overscroll-y-contain">
           {activeView === 'main' && (
             <div className="animate-in fade-in duration-300 pb-6">
               {activeTab === 'closet' && (
@@ -591,12 +687,18 @@ export default function App() {
 
 function NavButton({ icon, label, isActive, onClick }) {
   return (
-    <button 
-      onClick={onClick} 
-      className={`flex flex-col items-center py-2 px-1 min-w-[64px] transition-all duration-200 active:scale-95 select-none focus:outline-none ${isActive ? 'text-blue-600' : 'text-gray-400 hover:text-gray-600'}`}
+    // 選ばれていないタブの色は text-gray-400(#9ca3af) だった。白地で比 2.54 しかなく、
+    // 5つ並ぶタブのうち常に4つが基準未満という状態だった。
+    // 「いま居ない場所」を示す文字なので装飾に見えるが、行き先の一覧そのものなので本文として測る。
+    // 色相は変えず gray-600(#4b5563) へ2段濃くした（比 7.56）。
+    // 選択中を青にして区別する作りは変えていない。
+    <button
+      onClick={onClick}
+      className={`flex flex-col items-center py-2 px-1 min-w-[64px] min-h-[44px] justify-center transition-all duration-200 active:scale-95 select-none focus:outline-none ${isActive ? 'text-blue-700' : 'text-gray-600 hover:text-gray-900'}`}
       aria-label={`${label}タブ`}
+      aria-current={isActive ? 'page' : undefined}
     >
-      <div className={`relative transition-transform duration-300 ${isActive ? 'scale-110' : 'scale-100'}`}>
+      <div className={`relative transition-transform duration-300 ${isActive ? 'scale-110' : 'scale-100'}`} aria-hidden="true">
         {React.cloneElement(icon, { size: 22, strokeWidth: isActive ? 2.5 : 2 })}
       </div>
       <span className={`text-[10px] mt-1.5 font-medium transition-all duration-200 ${isActive ? 'font-bold' : ''}`}>{label}</span>
@@ -660,7 +762,7 @@ function ClosetView({ items, isLoading, onItemClick, onOpenAiStylist }) {
             onChange={(e) => setSearchQuery(e.target.value)}
           />
           {searchQuery && (
-            <button onClick={() => setSearchQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 p-1">
+            <button onClick={() => setSearchQuery('')} className="tap-44 absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-800 p-1">
               <X size={16} />
             </button>
           )}
@@ -681,7 +783,7 @@ function ClosetView({ items, isLoading, onItemClick, onOpenAiStylist }) {
 
       {isFilterOpen && (
         <div className="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm mb-4 space-y-4 animate-in fade-in slide-in-from-top-2 text-sm relative">
-          <button onClick={() => setIsFilterOpen(false)} className="absolute top-3 right-3 text-gray-400 hover:text-gray-600 p-1.5 bg-gray-50 hover:bg-gray-100 rounded-full transition-colors active:scale-95"><X size={18}/></button>
+          <button onClick={() => setIsFilterOpen(false)} className="tap-44 absolute top-3 right-3 text-gray-500 hover:text-gray-800 p-1.5 bg-gray-50 hover:bg-gray-100 rounded-full transition-colors active:scale-95"><X size={18}/></button>
           <div className="pr-6">
             <label className="text-[11px] font-bold text-gray-500 mb-1.5 block">並び替え</label>
             <select value={sortOption} onChange={e => setSortOption(e.target.value)} className="w-full p-2.5 bg-gray-50 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium text-gray-700 appearance-none">
@@ -732,10 +834,14 @@ function ClosetView({ items, isLoading, onItemClick, onOpenAiStylist }) {
 
       {!isFilterOpen && (
         <div className="flex overflow-x-auto pb-3 -mx-4 px-4 scrollbar-hide gap-2 mb-1">
+          {/* 横に並ぶ絞り込みの帯。高さは 30px しかなかった。
+              min-height を当てると帯が厚くなって一覧が押し出されるので、
+              tap-44 で当たり判定だけを広げる（§2-9）。 */}
           {categories.map(cat => (
             <button key={cat} onClick={() => setFilterCategory(cat)}
-              className={`whitespace-nowrap px-4 py-1.5 rounded-full text-xs font-bold transition-all active:scale-95 ${filterCategory === cat ? 'bg-gray-900 text-white shadow-md' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
-              {cat}
+              aria-pressed={filterCategory === cat}
+              className={`tap-44 whitespace-nowrap px-4 py-1.5 rounded-full text-xs font-bold transition-all active:scale-95 ${filterCategory === cat ? 'bg-gray-900 text-white shadow-md' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
+              <span>{cat}</span>
             </button>
           ))}
         </div>
@@ -753,19 +859,30 @@ function ClosetView({ items, isLoading, onItemClick, onOpenAiStylist }) {
       ) : (
         <div className="grid grid-cols-2 gap-3 md:gap-4">
           {filteredItems.map(item => (
-            <div key={item.id} className="bg-white rounded-2xl overflow-hidden shadow-sm border border-gray-100 cursor-pointer hover:shadow-md transition-all active:scale-[0.98] relative group" onClick={() => onItemClick(item)}>
-              <FadeImage src={item.imageUrl} alt={item.name} className="aspect-square w-full border-b border-gray-50" />
-              
+            // カード全体が押せる。以前は div に onClick を付けていたため、
+            // Tab で辿り着けず、キーボードだけではどのアイテムの詳細も開けなかった。
+            // 押せるものは <button> にする（Enter / Space も自動で効く）。
+            // AIボタンを中に入れ子にできないので、カードは relative な div のまま置き、
+            // 中に「画面いっぱいに広がる button」を敷いている。
+            <div key={item.id} className="bg-white rounded-2xl overflow-hidden shadow-sm border border-gray-100 hover:shadow-md transition-all active:scale-[0.98] relative group fc-outline">
+              <button
+                type="button"
+                onClick={() => onItemClick(item)}
+                className="absolute inset-0 z-0 w-full h-full cursor-pointer focus:outline-none focus-visible:ring-4 focus-visible:ring-blue-700 rounded-2xl"
+                aria-label={`${item.name} の詳細をひらく`}
+              />
+              <FadeImage src={item.imageUrl} alt="" className="aspect-square w-full border-b border-gray-50" />
+
               {/* アイテムから直接AIスタイリストを開くショートカットボタン */}
-              <button 
+              <button
                 onClick={(e) => {
                   e.stopPropagation();
                   if (onOpenAiStylist) onOpenAiStylist(item.id);
                 }}
-                className="absolute top-2 right-2 p-2 bg-white/90 backdrop-blur-md text-blue-600 rounded-full shadow-sm hover:bg-white active:scale-95 transition-all opacity-95 hover:opacity-100"
-                aria-label="このアイテムでAIスタイリストを実行"
+                className="tap-44 absolute top-2 right-2 z-10 p-2 bg-white/90 backdrop-blur-md text-blue-700 rounded-full shadow-sm hover:bg-white active:scale-95 transition-all opacity-95 hover:opacity-100"
+                aria-label={`${item.name} に合うコーデをAIに相談する`}
               >
-                <Sparkles size={16} strokeWidth={2.5} />
+                <Sparkles size={16} strokeWidth={2.5} aria-hidden="true" />
               </button>
 
               {sortOption.includes('price') && item.price && (
@@ -868,18 +985,18 @@ function DetailView({ item, items, coords, onUpdate, onDispose, customCategories
       <div className="p-5 space-y-5 bg-white min-h-full animate-in fade-in">
         <div className="flex justify-between items-center mb-2">
           <h3 className="font-bold text-xl text-gray-900">アイテムの編集</h3>
-          <button onClick={() => { setIsEditing(false); aiAnalysisPreviews.forEach(p => URL.revokeObjectURL(p)); setAiAnalysisFiles([]); setAiAnalysisPreviews([]); }} className="text-gray-400 hover:text-gray-600 hover:bg-gray-100 p-2 rounded-full transition-colors active:scale-95" aria-label="閉じる"><X size={24}/></button>
+          <button onClick={() => { setIsEditing(false); aiAnalysisPreviews.forEach(p => URL.revokeObjectURL(p)); setAiAnalysisFiles([]); setAiAnalysisPreviews([]); }} className="tap-44 text-gray-500 hover:text-gray-800 hover:bg-gray-100 p-2 rounded-full transition-colors active:scale-95" aria-label="閉じる"><X size={24}/></button>
         </div>
 
         <div className="flex flex-col items-center gap-4 mb-6">
           <div className="relative w-36 h-36 rounded-3xl overflow-hidden bg-gray-50 border border-gray-200 group cursor-pointer shadow-sm" onClick={() => fileInputRef.current?.click()}>
-            <img src={formData.imageUrl} alt="preview" className="w-full h-full object-cover" />
+            <img src={formData.imageUrl} alt="いま登録されている写真" width={400} height={400} decoding="async" className="w-full h-full object-cover" />
             <div className="absolute inset-0 bg-black/50 flex flex-col items-center justify-center text-white opacity-0 group-hover:opacity-100 transition-opacity backdrop-blur-sm">
               <Camera size={28} className="mb-1" />
               <span className="text-[11px] font-bold">画像を変更</span>
             </div>
           </div>
-          <button onClick={() => fileInputRef.current?.click()} className="text-xs font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 active:bg-blue-200 px-5 py-2.5 rounded-xl transition-colors shadow-sm">画像を選択し直す</button>
+          <button onClick={() => fileInputRef.current?.click()} className="tap-44 text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 active:bg-blue-200 px-5 py-2.5 rounded-xl transition-colors shadow-sm">画像を選択し直す</button>
           <input type="file" ref={fileInputRef} accept="image/*" className="hidden" onChange={handleImageChange} />
         </div>
 
@@ -893,7 +1010,7 @@ function DetailView({ item, items, coords, onUpdate, onDispose, customCategories
               <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
                 {aiAnalysisPreviews.map((p, i) => (
                   <div key={i} className="relative shrink-0">
-                    <img src={p} alt="" className="w-16 h-16 rounded-xl object-cover border border-blue-200 shadow-sm" />
+                    <img src={p} alt="" width={64} height={64} loading="lazy" decoding="async" className="w-16 h-16 rounded-xl object-cover border border-blue-200 shadow-sm" />
                     <button onClick={() => removeAiPhoto(i)} className="absolute -top-1.5 -right-1.5 bg-red-500 text-white p-0.5 rounded-full shadow-sm" aria-label="削除"><X size={12} /></button>
                   </div>
                 ))}
@@ -912,7 +1029,7 @@ function DetailView({ item, items, coords, onUpdate, onDispose, customCategories
               <button
                 onClick={runAiAnalysis}
                 disabled={isAiProcessing}
-                className="flex-1 py-3 bg-gray-900 text-white rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 active:scale-95 transition-all disabled:opacity-50 shadow-sm"
+                className="tap-44 flex-1 py-3 bg-gray-900 text-white rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 active:scale-95 transition-all disabled:opacity-50 shadow-sm"
               >
                 {isAiProcessing ? <><Loader2 size={16} className="animate-spin" /> 解析中...</> : <><Sparkles size={16} /> AIで解析{aiAnalysisPreviews.length > 0 ? `（${aiAnalysisPreviews.length}枚）` : '（現在の画像）'}</>}
               </button>
@@ -947,14 +1064,14 @@ function DetailView({ item, items, coords, onUpdate, onDispose, customCategories
             <p className="text-xs font-bold text-blue-600 mb-1.5 bg-blue-50 inline-block px-2.5 py-1 rounded-md">{item.brand ? `${item.brand} / ${item.category}` : item.category}</p>
             <h2 className="text-2xl font-extrabold leading-tight text-gray-900">{item.name}</h2>
           </div>
-          <button onClick={() => setIsEditing(true)} className="p-2.5 bg-gray-100 hover:bg-gray-200 active:bg-gray-300 rounded-full text-gray-600 transition-colors shadow-sm" aria-label="編集"><Edit3 size={20} /></button>
+          <button onClick={() => setIsEditing(true)} className="tap-44 p-2.5 bg-gray-100 hover:bg-gray-200 active:bg-gray-300 rounded-full text-gray-600 transition-colors shadow-sm" aria-label="編集"><Edit3 size={20} /></button>
         </div>
 
         <div className="grid grid-cols-3 gap-2 text-center mb-2">
           <div className="bg-gray-50 border border-gray-100 p-2.5 rounded-2xl"><p className="text-[10px] text-gray-500 font-medium mb-0.5">Price</p><p className="text-sm font-bold text-gray-800">{item.price ? `¥${item.price.toLocaleString()}` : '-'}</p></div>
           <div className="bg-gray-50 border border-gray-100 p-2.5 rounded-2xl"><p className="text-[10px] text-gray-500 font-medium mb-0.5">Wears</p><p className="text-sm font-bold text-gray-800">{wearCount} 回</p></div>
           <div className="bg-gradient-to-br from-indigo-50 to-purple-50 border border-indigo-100 p-2.5 rounded-2xl shadow-inner">
-            <p className="text-[10px] text-indigo-500 font-bold mb-0.5">CPW (1回あたり)</p>
+            <p className="text-[10px] text-indigo-700 font-bold mb-0.5">CPW (1回あたり)</p>
             <p className="text-sm font-extrabold text-indigo-700">{cpw ? `¥${cpw.toLocaleString()}` : '-'}</p>
           </div>
         </div>
@@ -1009,7 +1126,7 @@ function DetailView({ item, items, coords, onUpdate, onDispose, customCategories
         </div>
 
         <div className="pt-6">
-          <button onClick={() => setConfirmDispose(true)} className="w-full py-4 text-red-500 font-bold bg-red-50 hover:bg-red-100 active:bg-red-200 rounded-2xl transition-colors flex items-center justify-center gap-2 shadow-sm"><Trash2 size={18} /> このアイテムを廃棄する</button>
+          <button onClick={() => setConfirmDispose(true)} className="w-full py-4 text-red-700 font-bold bg-red-50 hover:bg-red-100 active:bg-red-200 rounded-2xl transition-colors flex items-center justify-center gap-2 shadow-sm"><Trash2 size={18} /> このアイテムを廃棄する</button>
         </div>
       </div>
       
@@ -1091,7 +1208,7 @@ function CalendarView({ items, wearLogs, setWearLogs, showToast }) {
             {dayLogs.slice(0, 3).map((log, i) => {
               const item = items.find(it => it.id === log.itemId);
               if (!item) return null;
-              return <img key={i} src={item.imageUrl} alt="" className="w-4 h-4 object-cover rounded-sm shadow-sm ring-1 ring-white/50" loading="lazy" />;
+              return <img key={i} src={item.imageUrl} alt="" width={16} height={16} loading="lazy" decoding="async" className="w-4 h-4 object-cover rounded-sm shadow-sm ring-1 ring-white/50" />;
             })}
             {dayLogs.length > 3 && <span className="text-[9px] text-gray-500 font-bold bg-gray-100 rounded-sm px-0.5">+{dayLogs.length - 3}</span>}
           </div>
@@ -1104,14 +1221,14 @@ function CalendarView({ items, wearLogs, setWearLogs, showToast }) {
   return (
     <div className="flex flex-col h-full bg-gray-50">
       <div className="bg-white border-b border-gray-100 p-3.5 flex justify-between items-center shadow-sm z-10">
-        <button onClick={handlePrevMonth} className="p-2 hover:bg-gray-100 active:bg-gray-200 rounded-full transition-colors"><ChevronLeft size={22} className="text-gray-600"/></button>
+        <button onClick={handlePrevMonth} className="tap-44 p-2 hover:bg-gray-100 active:bg-gray-200 rounded-full transition-colors"><ChevronLeft size={22} className="text-gray-600"/></button>
         <h2 className="font-extrabold text-gray-900 text-lg tracking-tight">{year}年 {month + 1}月</h2>
-        <button onClick={handleNextMonth} className="p-2 hover:bg-gray-100 active:bg-gray-200 rounded-full transition-colors"><ChevronRight size={22} className="text-gray-600"/></button>
+        <button onClick={handleNextMonth} className="tap-44 p-2 hover:bg-gray-100 active:bg-gray-200 rounded-full transition-colors"><ChevronRight size={22} className="text-gray-600"/></button>
       </div>
       
       <div className="bg-white">
         <div className="grid grid-cols-7 border-b border-gray-200 bg-gray-50/80">
-          {['日','月','火','水','木','金','土'].map((d, i) => <div key={d} className={`text-center text-[10px] font-extrabold py-2.5 ${i===0 ? 'text-red-500': i===6 ? 'text-blue-500' : 'text-gray-500'}`}>{d}</div>)}
+          {['日','月','火','水','木','金','土'].map((d, i) => <div key={d} className={`text-center text-[10px] font-extrabold py-2.5 ${i===0 ? 'text-red-700': i===6 ? 'text-blue-700' : 'text-gray-600'}`}>{d}</div>)}
         </div>
         <div className="grid grid-cols-7 border-l border-gray-100">{renderCalendarDays()}</div>
       </div>
@@ -1123,20 +1240,20 @@ function CalendarView({ items, wearLogs, setWearLogs, showToast }) {
               <CalendarDays className="text-blue-500" size={20}/>
               {selectedDateStr.split('-')[1]}月{selectedDateStr.split('-')[2]}日の記録
             </h3>
-            {!isAdding && <button onClick={() => setIsAdding(true)} className="text-sm font-bold text-white bg-gray-900 hover:bg-gray-800 active:scale-95 px-4 py-2 rounded-xl flex items-center gap-1.5 transition-all shadow-sm"><Plus size={16}/>追加</button>}
+            {!isAdding && <button onClick={() => setIsAdding(true)} className="tap-44 text-sm font-bold text-white bg-gray-900 hover:bg-gray-800 active:scale-95 px-4 py-2 rounded-xl flex items-center gap-1.5 transition-all shadow-sm"><Plus size={16}/>追加</button>}
           </div>
 
           {isAdding ? (
             <div className="space-y-4 animate-in fade-in">
               <div className="flex justify-between items-center">
                 <span className="text-xs font-bold text-gray-500">着用したアイテムを選択</span>
-                <button onClick={()=>setIsAdding(false)} className="text-xs font-bold text-gray-500 bg-gray-100 hover:bg-gray-200 px-3 py-1.5 rounded-lg transition-colors active:scale-95">キャンセル</button>
+                <button onClick={()=>setIsAdding(false)} className="tap-44 text-xs font-bold text-gray-600 bg-gray-100 hover:bg-gray-200 px-3 py-1.5 rounded-lg transition-colors active:scale-95">キャンセル</button>
               </div>
 
               <div className="flex overflow-x-auto pb-2 -mx-2 px-2 scrollbar-hide gap-1.5">
                 {['すべて', ...new Set(items.map(item => item.category).filter(Boolean))].map(cat => (
                   <button key={cat} onClick={() => setFilter(cat)}
-                    className={`whitespace-nowrap px-3.5 py-2 rounded-full text-[11px] font-bold transition-all active:scale-95 ${filter === cat ? 'bg-gray-800 text-white shadow-sm' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+                    className={`tap-44 whitespace-nowrap px-3.5 py-2 rounded-full text-[11px] font-bold transition-all active:scale-95 ${filter === cat ? 'bg-gray-800 text-white shadow-sm' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
                     {cat}
                   </button>
                 ))}
@@ -1163,7 +1280,7 @@ function CalendarView({ items, wearLogs, setWearLogs, showToast }) {
                         <FadeImage src={item.imageUrl} alt="" className="w-12 h-12 rounded-xl" />
                         <div><p className="text-sm font-bold text-gray-900 leading-tight">{item.name}</p><p className="text-[11px] font-medium text-blue-600 mt-0.5">{item.category}</p></div>
                       </div>
-                      <button onClick={() => removeWearLog(log.id)} className="p-2.5 text-gray-400 hover:text-red-500 hover:bg-red-50 active:bg-red-100 rounded-full transition-colors" aria-label="記録を削除"><Trash2 size={18}/></button>
+                      <button onClick={() => removeWearLog(log.id)} className="tap-44 p-2.5 text-gray-500 hover:text-red-700 hover:bg-red-50 active:bg-red-100 rounded-full transition-colors" aria-label="記録を削除"><Trash2 size={18}/></button>
                     </div>
                   );
                 })
@@ -1204,8 +1321,8 @@ function DisposedView({ items, onRestore, onPermanentDelete, showToast }) {
             <h3 className="font-bold text-gray-900 text-sm leading-snug">{item.name}</h3>
             <p className="text-[11px] font-medium text-gray-500 mb-3 mt-1">廃棄日: {new Date(item.disposedAt).toLocaleDateString()}</p>
             <div className="flex gap-2">
-              <button onClick={() => setConfirmRestoreId(item.id)} className="flex-1 text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 active:scale-95 py-2 rounded-xl flex items-center justify-center gap-1 transition-all"><RotateCcw size={14}/> 戻す</button>
-              <button onClick={() => setConfirmDeleteId(item.id)} className="flex-1 text-xs font-bold text-red-600 bg-red-50 hover:bg-red-100 active:scale-95 py-2 rounded-xl flex items-center justify-center gap-1 transition-all"><Trash2 size={14}/> 削除</button>
+              <button onClick={() => setConfirmRestoreId(item.id)} className="tap-44 flex-1 text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 active:scale-95 py-2 rounded-xl flex items-center justify-center gap-1 transition-all"><RotateCcw size={14}/> 戻す</button>
+              <button onClick={() => setConfirmDeleteId(item.id)} className="tap-44 flex-1 text-xs font-bold text-red-700 bg-red-50 hover:bg-red-100 active:scale-95 py-2 rounded-xl flex items-center justify-center gap-1 transition-all"><Trash2 size={14}/> 削除</button>
             </div>
           </div>
         </div>
@@ -1277,8 +1394,8 @@ function CoordView({ items, coords, setCoords, showToast, apiKey, initialAiTarge
       <div className="flex justify-between items-center mb-5">
         <h2 className="font-bold text-gray-900">マイコーデ ({coords.length})</h2>
         <div className="flex gap-2">
-          <button onClick={() => { if (!apiKey) { showToast('設定からAPIキーを登録してください', 'error'); return; } setIsAiMode(true); }} className="text-[11px] font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 active:scale-95 px-3 py-2 rounded-xl flex items-center gap-1.5 transition-all shadow-sm"><Sparkles size={14}/>AI提案</button>
-          <button onClick={() => setIsCreating(true)} className="text-[11px] font-bold text-white bg-gray-900 hover:bg-gray-800 active:scale-95 px-3 py-2 rounded-xl flex items-center gap-1.5 transition-all shadow-sm"><Plus size={14}/>新規作成</button>
+          <button onClick={() => { if (!apiKey) { showToast('設定からAPIキーを登録してください', 'error'); return; } setIsAiMode(true); }} className="tap-44 text-[11px] font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 active:scale-95 px-3 py-2 rounded-xl flex items-center gap-1.5 transition-all shadow-sm"><Sparkles size={14}/>AI提案</button>
+          <button onClick={() => setIsCreating(true)} className="tap-44 text-[11px] font-bold text-white bg-gray-900 hover:bg-gray-800 active:scale-95 px-3 py-2 rounded-xl flex items-center gap-1.5 transition-all shadow-sm"><Plus size={14}/>新規作成</button>
         </div>
       </div>
       
@@ -1302,7 +1419,7 @@ function CoordView({ items, coords, setCoords, showToast, apiKey, initialAiTarge
                   <div className="flex gap-1.5">
                     {[1,2,3,4,5].map(star => <Star key={star} onClick={() => handleRate(coord, star)} size={22} className={`cursor-pointer transition-all active:scale-110 ${coord.rating >= star ? 'fill-yellow-400 text-yellow-400' : 'text-gray-200 hover:text-gray-300'}`} />)}
                   </div>
-                  <button onClick={() => setDeleteId(coord.id)} className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-full transition-colors"><Trash2 size={18}/></button>
+                  <button onClick={() => setDeleteId(coord.id)} className="tap-44 p-2 text-gray-500 hover:text-red-700 hover:bg-red-50 rounded-full transition-colors"><Trash2 size={18}/></button>
                 </div>
               </div>
             );
@@ -1416,11 +1533,11 @@ function StatsView({ activeItems, disposedItems, wearLogs }) {
       <div className="grid grid-cols-2 gap-3">
         <div className="bg-white p-5 rounded-3xl border border-gray-100 shadow-sm">
           <p className="text-[11px] font-bold text-gray-500 mb-1.5">アクティブアイテム</p>
-          <p className="text-3xl font-extrabold text-gray-900">{activeItems.length}<span className="text-sm font-medium text-gray-400 ml-1">点</span></p>
+          <p className="text-3xl font-extrabold text-gray-900">{activeItems.length}<span className="text-sm font-medium text-gray-600 ml-1">点</span></p>
         </div>
         <div className="bg-gray-50 p-5 rounded-3xl border border-gray-200 shadow-sm">
           <p className="text-[11px] font-bold text-gray-500 mb-1.5">廃棄済みアイテム</p>
-          <p className="text-3xl font-extrabold text-gray-500">{disposedItems.length}<span className="text-sm font-medium text-gray-400 ml-1">点</span></p>
+          <p className="text-3xl font-extrabold text-gray-500">{disposedItems.length}<span className="text-sm font-medium text-gray-600 ml-1">点</span></p>
         </div>
       </div>
 
@@ -1428,11 +1545,14 @@ function StatsView({ activeItems, disposedItems, wearLogs }) {
         <div className="absolute -right-4 -top-4 opacity-10"><BarChart3 size={100} strokeWidth={3} /></div>
         <h3 className="text-sm font-bold text-gray-300 border-b border-white/10 pb-3 relative z-10">アイテムの資産状況</h3>
         <div className="grid grid-cols-2 gap-4 relative z-10">
-           <div><p className="text-[10px] font-bold text-gray-400 mb-1">現在のクローゼット</p><p className="text-xl font-bold">¥{activeTotal.toLocaleString()}</p></div>
-           <div><p className="text-[10px] font-bold text-gray-400 mb-1">廃棄済み総額</p><p className="text-xl font-bold text-gray-300">¥{disposedTotal.toLocaleString()}</p></div>
+           {/* ⚠️ ここは bg-gray-900 の濃い面の上。白地の文字を濃くする一括の直しを
+               そのまま当てると、薄い文字まで濃くなって逆に読めなくなる（実測 2.35）。
+               濃い面の上では明るい側へ寄せる。gray-300 で比 9.7。 */}
+           <div><p className="text-[10px] font-bold text-gray-300 mb-1">現在のクローゼット</p><p className="text-xl font-bold">¥{activeTotal.toLocaleString()}</p></div>
+           <div><p className="text-[10px] font-bold text-gray-300 mb-1">廃棄済み総額</p><p className="text-xl font-bold text-gray-300">¥{disposedTotal.toLocaleString()}</p></div>
         </div>
         <div className="pt-4 border-t border-white/10 relative z-10">
-           <p className="text-xs font-bold text-gray-400 mb-1">累計投資総額</p>
+           <p className="text-xs font-bold text-gray-300 mb-1">累計投資総額</p>
            <p className="text-3xl font-extrabold tracking-tight">¥{allTotal.toLocaleString()}</p>
         </div>
       </div>
@@ -1440,15 +1560,18 @@ function StatsView({ activeItems, disposedItems, wearLogs }) {
       <div className="bg-white p-5 rounded-3xl border border-gray-100 shadow-sm">
         <div className="flex justify-between items-center mb-4">
           <h3 className="text-sm font-bold text-gray-800 flex items-center gap-1.5"><BarChart3 size={18} className="text-blue-500"/> 着用回数 Top 5</h3>
-          <select value={rankCategory} onChange={(e) => setRankCategory(e.target.value)} className="text-[11px] font-bold text-gray-600 bg-gray-50 border border-gray-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none">
+          {/* select には疑似要素が使えない（中身をブラウザが描くため）。
+              高さそのものを 44px 確保する。ここは1つだけ置かれる絞り込みなので、
+              背が高くなっても他の要素を押し出さない。 */}
+          <select value={rankCategory} onChange={(e) => setRankCategory(e.target.value)} aria-label="着用ランキングのカテゴリで絞り込む" className="text-[11px] font-bold text-gray-600 bg-gray-50 border border-gray-200 rounded-lg px-2.5 min-h-[44px] py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-700 appearance-none">
             {categories.map(cat => <option key={cat} value={cat}>{cat}</option>)}
           </select>
         </div>
-        {wearRanking.length === 0 ? <p className="text-xs font-medium text-gray-400 text-center py-6">記録がありません</p> : (
+        {wearRanking.length === 0 ? <p className="text-xs font-medium text-gray-600 text-center py-6">記録がありません</p> : (
           <div className="space-y-4">
             {wearRanking.map((rank, i) => (
               <div key={rank.item.id} className="flex items-center gap-3.5">
-                <span className={`text-sm font-extrabold w-5 text-center ${i===0?'text-yellow-500':i===1?'text-gray-400':i===2?'text-amber-700':'text-gray-300'}`}>{i+1}</span>
+                <span className={`text-sm font-extrabold w-5 text-center ${i===0?'text-yellow-700':i===1?'text-gray-600':i===2?'text-amber-800':'text-gray-500'}`}>{i+1}</span>
                 <FadeImage src={rank.item.imageUrl} alt="" className="w-12 h-12 rounded-xl shadow-sm" />
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-bold text-gray-900 truncate mb-1.5">{rank.item.name}</p>
@@ -1456,7 +1579,7 @@ function StatsView({ activeItems, disposedItems, wearLogs }) {
                     <div className="bg-blue-500 h-full rounded-full transition-all duration-1000 ease-out" style={{ width: `${Math.min((rank.count / wearRanking[0].count) * 100, 100)}%` }}></div>
                   </div>
                 </div>
-                <span className="text-sm font-extrabold text-blue-600 w-8 text-right">{rank.count}<span className="text-[10px] text-gray-400 ml-0.5">回</span></span>
+                <span className="text-sm font-extrabold text-blue-600 w-8 text-right">{rank.count}<span className="text-[10px] text-gray-600 ml-0.5">回</span></span>
               </div>
             ))}
           </div>
@@ -1473,7 +1596,7 @@ function StatsView({ activeItems, disposedItems, wearLogs }) {
                 <div className="flex-1 bg-gray-100 rounded-full h-2 overflow-hidden">
                   <div className="bg-gray-800 h-full rounded-full" style={{ width: `${(count / activeItems.length) * 100}%` }}></div>
                 </div>
-                <span className="text-gray-900 font-bold w-8 text-right">{count}<span className="text-[10px] text-gray-400 font-normal ml-0.5">点</span></span>
+                <span className="text-gray-900 font-bold w-8 text-right">{count}<span className="text-[10px] text-gray-600 font-normal ml-0.5">点</span></span>
               </div>
             </div>
           ))}
@@ -1506,7 +1629,7 @@ function ItemForm({ formData, onChange, onSeasonsChange, customCategories, custo
   const handleChange = (e) => onChange({ ...formData, [e.target.name]: e.target.value });
   return (
     <div className="space-y-4">
-      <div><label className="text-[11px] font-bold text-gray-500 ml-1 mb-1 block">名前 <span className="text-red-500">*</span></label><input name="name" value={formData.name || ''} onChange={handleChange} className="w-full p-3.5 bg-gray-50 rounded-xl border border-gray-200 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none transition-shadow placeholder:text-gray-400" placeholder="例: 白いTシャツ" /></div>
+      <div><label className="text-[11px] font-bold text-gray-500 ml-1 mb-1 block">名前 <span className="text-red-700">*</span></label><input name="name" value={formData.name || ''} onChange={handleChange} className="w-full p-3.5 bg-gray-50 rounded-xl border border-gray-200 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none transition-shadow placeholder:text-gray-400" placeholder="例: 白いTシャツ" /></div>
       <div className="grid grid-cols-2 gap-4">
         <div><label className="text-[11px] font-bold text-gray-500 ml-1 mb-1 block">カテゴリ</label><input name="category" value={formData.category || ''} onChange={handleChange} list={`${idPrefix}-category-list`} className="w-full p-3.5 bg-gray-50 rounded-xl border border-gray-200 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none transition-shadow placeholder:text-gray-400" placeholder="例: トップス" /><datalist id={`${idPrefix}-category-list`}>{customCategories.map(cat => <option key={cat} value={cat} />)}</datalist></div>
         <div><label className="text-[11px] font-bold text-gray-500 ml-1 mb-1 block">色</label><input name="color" value={formData.color || ''} onChange={handleChange} list={`${idPrefix}-color-list`} className="w-full p-3.5 bg-gray-50 rounded-xl border border-gray-200 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none transition-shadow placeholder:text-gray-400" placeholder="例: ホワイト" /><datalist id={`${idPrefix}-color-list`}>{customColors.map(color => <option key={color} value={color} />)}</datalist></div>
@@ -1600,7 +1723,7 @@ function AddView({ apiKey, customCategories, customColors, showToast, onSuccess 
               <div className={`grid gap-3 ${previews.length === 1 ? 'grid-cols-1' : 'grid-cols-2'}`}>
                 {previews.map((p, i) => (
                   <div key={i} className="relative rounded-3xl overflow-hidden bg-gray-50 aspect-square w-full shadow-md border border-gray-200">
-                    <img src={p} alt="" className="w-full h-full object-contain" />
+                    <img src={p} alt="" width={400} height={400} decoding="async" className="w-full h-full object-contain" />
                     <button onClick={() => removePhoto(i)} className="absolute top-3 right-3 bg-black/50 hover:bg-black/70 active:scale-95 text-white p-2 rounded-full transition-all backdrop-blur-sm" aria-label="画像を削除"><X size={16} /></button>
                     {i === 0 && previews.length > 1 && <span className="absolute top-3 left-3 bg-blue-600 text-white text-[10px] font-bold px-2.5 py-1 rounded-full shadow-sm">メイン</span>}
                   </div>
@@ -1647,7 +1770,7 @@ function AddView({ apiKey, customCategories, customColors, showToast, onSuccess 
           {/* Thumbnail of main image */}
           <div className="flex gap-3 overflow-x-auto pb-1 scrollbar-hide">
             {previews.map((p, i) => (
-              <img key={i} src={p} alt="" className={`w-20 h-20 rounded-2xl object-cover border-2 shadow-sm shrink-0 ${i === 0 ? 'border-blue-500' : 'border-gray-200'}`} />
+              <img key={i} src={p} alt="" width={80} height={80} loading="lazy" decoding="async" className={`w-20 h-20 rounded-2xl object-cover border-2 shadow-sm shrink-0 ${i === 0 ? 'border-blue-600' : 'border-gray-200'}`} />
             ))}
           </div>
 
@@ -1663,6 +1786,71 @@ function AddView({ apiKey, customCategories, customColors, showToast, onSuccess 
 }
 
 // ==================== Settings View ====================
+/**
+ * ホーム画面への追加の案内（§3-2）。
+ *
+ * 「案内できるときだけ出す」のが要点。
+ * 出せないボタンを置いておくと「押しても何も起きない」と言われる。
+ *   - すでにホーム画面から起動している → 何も出さない
+ *   - Chrome など：合図（beforeinstallprompt）を受け取れたときだけボタンを出す
+ *   - iOS Safari：合図そのものが無いので、手順を文章で案内する
+ */
+function InstallSection() {
+  const [canPrompt, setCanPrompt] = useState(() => !!window.__pwaInstallPrompt);
+  const [installed, setInstalled] = useState(() => isStandalone());
+
+  useEffect(() => {
+    const onAvailable = () => setCanPrompt(true);
+    const onInstalled = () => { setCanPrompt(false); setInstalled(true); };
+    window.addEventListener('pwa-install-available', onAvailable);
+    window.addEventListener('pwa-installed', onInstalled);
+    return () => {
+      window.removeEventListener('pwa-install-available', onAvailable);
+      window.removeEventListener('pwa-installed', onInstalled);
+    };
+  }, []);
+
+  const install = async () => {
+    const prompt = window.__pwaInstallPrompt;
+    if (!prompt) return;
+    window.__pwaInstallPrompt = null;
+    setCanPrompt(false);
+    prompt.prompt();
+    await prompt.userChoice;
+  };
+
+  if (installed) return null;
+  if (!canPrompt && !isIos()) return null;
+
+  return (
+    <section className="bg-white p-5 rounded-3xl border border-gray-100 shadow-sm">
+      <h3 className="font-bold mb-3 flex items-center gap-2 text-gray-800">
+        <Smartphone size={18} className="text-blue-700" aria-hidden="true" /> アプリとして使う
+      </h3>
+      <p className="text-[11px] text-gray-600 mb-3 leading-relaxed">
+        ホーム画面に追加すると、ブラウザのバーが消えて広く使えます。
+        電波が届かないところでも、登録済みの服を見られます。
+      </p>
+
+      {canPrompt ? (
+        <button
+          onClick={install}
+          className="w-full py-3.5 bg-blue-700 text-white rounded-xl font-bold text-sm hover:bg-blue-800 active:scale-95 transition-all shadow-sm"
+        >
+          ホーム画面に追加する
+        </button>
+      ) : (
+        // iOS Safari には beforeinstallprompt が無いので、ボタンでは案内できない。
+        <ol className="text-[11px] text-gray-700 leading-relaxed list-decimal pl-4 space-y-1">
+          <li>画面の下（または上）にある「共有」<span aria-hidden="true">□↑</span> を押す</li>
+          <li>メニューを下へたどって「ホーム画面に追加」を選ぶ</li>
+          <li>右上の「追加」を押す</li>
+        </ol>
+      )}
+    </section>
+  );
+}
+
 function SettingsView({ apiKey, setApiKey, geminiModel, setGeminiModel, customCategories, setCustomCategories, customColors, setCustomColors, showToast, onDataImported, onOpenDisposed }) {
   const [localKey, setLocalKey] = useState(apiKey);
   const [isExporting, setIsExporting] = useState(false);
@@ -1750,8 +1938,10 @@ function SettingsView({ apiKey, setApiKey, geminiModel, setGeminiModel, customCa
 
   return (
     <div className="p-4 space-y-5 pb-10">
+      <InstallSection />
+
       <section className="bg-white p-5 rounded-3xl border border-gray-100 shadow-sm">
-        <h3 className="font-bold mb-3 flex items-center gap-2 text-gray-800"><Settings size={18} className="text-gray-400"/> Gemini APIキー</h3>
+        <h3 className="font-bold mb-3 flex items-center gap-2 text-gray-800"><Settings size={18} className="text-gray-500" aria-hidden="true"/> Gemini APIキー</h3>
         <input type="password" value={localKey} onChange={(e) => setLocalKey(e.target.value)} placeholder="AIzaSy..." className="w-full px-4 py-3.5 bg-gray-50 border border-gray-200 rounded-xl mb-3 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500" />
         <button onClick={handleSaveKey} className="w-full py-3.5 bg-gray-900 text-white rounded-xl font-bold text-sm hover:bg-gray-800 active:scale-95 transition-all shadow-sm">保存する</button>
       </section>
@@ -1761,7 +1951,7 @@ function SettingsView({ apiKey, setApiKey, geminiModel, setGeminiModel, customCa
         <p className="text-[11px] text-gray-500 mb-3 leading-relaxed">使用するGeminiモデルを選択できます。「モデル一覧を取得」で最新のモデルを取得してください。</p>
         <div className="flex items-center gap-2 mb-3">
           <div className="flex-1 px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm font-mono text-gray-700 truncate">{geminiModel}</div>
-          <button onClick={handleFetchModels} disabled={isLoadingModels} className="shrink-0 px-4 py-3 bg-gray-900 text-white rounded-xl font-bold text-xs active:scale-95 transition-all disabled:opacity-50 shadow-sm flex items-center gap-1.5">
+          <button onClick={handleFetchModels} disabled={isLoadingModels} className="tap-44 shrink-0 px-4 py-3 bg-gray-900 text-white rounded-xl font-bold text-xs active:scale-95 transition-all disabled:opacity-50 shadow-sm flex items-center gap-1.5">
             {isLoadingModels ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />}
             取得
           </button>
@@ -1790,7 +1980,7 @@ function SettingsView({ apiKey, setApiKey, geminiModel, setGeminiModel, customCa
         <div>
           <div className="flex justify-between items-center mb-3">
             <h3 className="font-bold flex items-center gap-2 text-gray-800"><Tags size={18} className="text-blue-500"/> カスタムカテゴリ</h3>
-            {!isEditingCategories && <button onClick={() => setIsEditingCategories(true)} className="text-xs font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 active:scale-95 px-3 py-1.5 rounded-lg transition-all">編集</button>}
+            {!isEditingCategories && <button onClick={() => setIsEditingCategories(true)} className="tap-44 text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 active:scale-95 px-3 py-1.5 rounded-lg transition-all">編集</button>}
           </div>
           {!isEditingCategories ? (
             <div className="flex flex-wrap gap-1.5">
@@ -1811,7 +2001,7 @@ function SettingsView({ apiKey, setApiKey, geminiModel, setGeminiModel, customCa
         <div className="pt-5 border-t border-gray-50">
           <div className="flex justify-between items-center mb-3">
             <h3 className="font-bold flex items-center gap-2 text-gray-800"><Palette size={18} className="text-amber-500"/> カスタムカラー</h3>
-            {!isEditingColors && <button onClick={() => setIsEditingColors(true)} className="text-xs font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 active:scale-95 px-3 py-1.5 rounded-lg transition-all">編集</button>}
+            {!isEditingColors && <button onClick={() => setIsEditingColors(true)} className="tap-44 text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 active:scale-95 px-3 py-1.5 rounded-lg transition-all">編集</button>}
           </div>
           {!isEditingColors ? (
             <div className="flex flex-wrap gap-1.5">
@@ -1948,7 +2138,7 @@ function AIChatView({ items, coords, setCoords, apiKey, showToast }) {
         {messages.map((msg, i) => (
           <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
             <div className={`max-w-[85%] p-4 rounded-3xl shadow-sm ${msg.role === 'user' ? `${modeColors[msg.mode || 'normal']} text-white rounded-tr-sm` : 'bg-white border border-gray-100 rounded-tl-sm text-gray-800'}`}>
-              {msg.image && <img src={msg.image} alt="attached" className="max-w-full h-auto rounded-xl mb-3 object-contain max-h-48 border border-black/5" />}
+              {msg.image && <img src={msg.image} alt="送った写真" width={400} height={300} loading="lazy" decoding="async" className="max-w-full h-auto rounded-xl mb-3 object-contain max-h-48 border border-black/5" />}
               {msg.text && <p className="text-[13px] whitespace-pre-wrap leading-relaxed">{msg.text}</p>}
               
               {/* 逆引きコーデの保存UI */}
@@ -1984,21 +2174,21 @@ function AIChatView({ items, coords, setCoords, apiKey, showToast }) {
       <div className="bg-white border-t border-gray-100 shadow-[0_-10px_20px_rgba(0,0,0,0.03)] flex flex-col z-10 pt-2">
         {/* モード切替タブ */}
         <div className="flex gap-2 px-4 pb-1 overflow-x-auto scrollbar-hide">
-          <button onClick={() => setChatMode('normal')} className={`shrink-0 px-3.5 py-1.5 rounded-full text-xs font-bold transition-all active:scale-95 ${chatMode === 'normal' ? 'bg-blue-600 text-white shadow-sm' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>💬 相談</button>
-          <button onClick={() => setChatMode('stopper')} className={`shrink-0 px-3.5 py-1.5 rounded-full text-xs font-bold transition-all active:scale-95 ${chatMode === 'stopper' ? 'bg-red-500 text-white shadow-sm' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>🛑 買わないストッパー</button>
-          <button onClick={() => setChatMode('reverse')} className={`shrink-0 px-3.5 py-1.5 rounded-full text-xs font-bold transition-all active:scale-95 ${chatMode === 'reverse' ? 'bg-purple-600 text-white shadow-sm' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>🔍 逆引きコーデ</button>
+          <button onClick={() => setChatMode('normal')} className={`tap-44 shrink-0 px-3.5 py-1.5 rounded-full text-xs font-bold transition-all active:scale-95 ${chatMode === 'normal' ? 'bg-blue-700 text-white shadow-sm' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>💬 相談</button>
+          <button onClick={() => setChatMode('stopper')} className={`tap-44 shrink-0 px-3.5 py-1.5 rounded-full text-xs font-bold transition-all active:scale-95 ${chatMode === 'stopper' ? 'bg-red-700 text-white shadow-sm' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>🛑 買わないストッパー</button>
+          <button onClick={() => setChatMode('reverse')} className={`tap-44 shrink-0 px-3.5 py-1.5 rounded-full text-xs font-bold transition-all active:scale-95 ${chatMode === 'reverse' ? 'bg-purple-700 text-white shadow-sm' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>🔍 逆引きコーデ</button>
         </div>
 
         {selectedImage && (
           <div className="px-4 pt-2 relative inline-block self-start">
             <div className="relative">
-              <img src={selectedImage} alt="preview" className="h-16 w-16 object-cover rounded-xl border border-gray-200 shadow-sm" />
+              <img src={selectedImage} alt="送ろうとしている写真" width={64} height={64} decoding="async" className="h-16 w-16 object-cover rounded-xl border border-gray-200 shadow-sm" />
               <button onClick={() => setSelectedImage(null)} className="absolute -top-2 -right-2 bg-gray-800 text-white rounded-full p-1.5 shadow-md hover:bg-gray-700 active:scale-95 transition-all"><X size={12} strokeWidth={3}/></button>
             </div>
           </div>
         )}
         <div className="p-3 flex gap-2 items-end">
-          <button onClick={() => fileInputRef.current?.click()} className="p-3 text-gray-400 hover:text-blue-600 hover:bg-blue-50 active:bg-blue-100 active:scale-95 rounded-xl transition-all shrink-0 mb-0.5" aria-label="画像を添付"><ImagePlus size={24} strokeWidth={1.5} /></button>
+          <button onClick={() => fileInputRef.current?.click()} className="tap-44 p-3 text-gray-500 hover:text-blue-700 hover:bg-blue-50 active:bg-blue-100 active:scale-95 rounded-xl transition-all shrink-0 mb-0.5" aria-label="画像を添付"><ImagePlus size={24} strokeWidth={1.5} /></button>
           <input type="file" ref={fileInputRef} accept="image/*" className="hidden" onChange={handleFileSelect} />
           <textarea id="chat-textarea" value={input} onChange={handleTextareaChange} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }} placeholder={chatMode === 'stopper' ? "この服買うべき？(画像必須)" : chatMode === 'reverse' ? "このコーデを再現して！(画像必須)" : "AIに相談する..."} className="flex-1 px-4 py-3.5 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-shadow resize-none overflow-y-auto" rows="1" style={{ minHeight: '48px', height: '48px' }} />
           <button onClick={handleSend} disabled={isLoading || (!input.trim() && !selectedImage)} className={`p-3 text-white rounded-xl active:scale-95 disabled:opacity-50 disabled:active:scale-100 transition-all shrink-0 mb-0.5 shadow-sm ${modeColors[chatMode]}`} aria-label="送信"><Sparkles size={22} /></button>

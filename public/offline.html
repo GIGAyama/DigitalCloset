@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="color-scheme" content="light" />
+  <meta name="theme-color" content="#1d4ed8" />
+  <title>インターネットにつながっていません — デジタルワードローブ</title>
+  <!--
+    この画面は「ネットにつながらず、アプリ本体も手元にない」ときに出る。
+    そういう状況で出るページなので、外部の資産にも JavaScript にも頼らない。
+    CSS も文字も自前で持ち、読み込み直しは <a href> で行う
+    （インラインの onclick は CSP に引っかかる）。
+  -->
+  <style>
+    :root {
+      --safe-t: env(safe-area-inset-top, 0px);
+      --safe-b: env(safe-area-inset-bottom, 0px);
+      --safe-l: env(safe-area-inset-left, 0px);
+      --safe-r: env(safe-area-inset-right, 0px);
+      color-scheme: light;
+    }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+    body {
+      margin: 0;
+      min-height: 100dvh;
+      padding: calc(24px + var(--safe-t)) calc(20px + var(--safe-r))
+               calc(24px + var(--safe-b)) calc(20px + var(--safe-l));
+      display: flex; align-items: center; justify-content: center;
+      background: #f9fafb;
+      color: #1f2937;
+      /* アプリ本体と同じ並び。Web フォントは使わない（届かない場面なので） */
+      font-family: "Hiragino Kaku Gothic ProN", "Yu Gothic UI", "Noto Sans JP",
+                   system-ui, -apple-system, sans-serif;
+      line-height: 1.8;
+      font-size: clamp(15px, 1.6vw + 10px, 18px);
+    }
+    @supports not (min-height: 100dvh) { body { min-height: 100vh; } }
+
+    .card {
+      width: 100%; max-width: 28rem;
+      background: #fff;
+      border: 1px solid #e5e7eb;
+      border-radius: 24px;
+      padding: 32px 24px;
+      text-align: center;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, .06);
+    }
+    .mark {
+      width: 72px; height: 72px; margin: 0 auto 20px;
+      border-radius: 22px;
+      background: #eff6ff;
+      display: flex; align-items: center; justify-content: center;
+    }
+    /* アイコンは SVG を直接置く。外部ファイルを読みに行かせない */
+    .mark svg { width: 38px; height: 38px; }
+    h1 {
+      margin: 0 0 12px;
+      font-size: clamp(18px, 2.2vw + 12px, 24px);
+      font-weight: 700;
+      color: #111827;
+    }
+    p { margin: 0 0 8px; color: #4b5563; }
+    .hint { font-size: .875em; color: #6b7280; margin-top: 16px; }
+    .btn {
+      display: inline-block;
+      margin-top: 24px;
+      /* 44px を確実に満たす高さ */
+      min-height: 44px; min-width: 44px;
+      padding: 13px 32px;
+      background: #1d4ed8; color: #fff;
+      border-radius: 14px;
+      font-weight: 700; text-decoration: none;
+    }
+    .btn:hover { background: #1e40af; }
+    .btn:focus-visible { outline: 3px solid #1d4ed8; outline-offset: 3px; }
+
+    /* 背景色が無効化されても押せると分かるようにする */
+    @media (forced-colors: active) {
+      .btn { border: 2px solid ButtonText; }
+      .card { border: 1px solid CanvasText; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: .01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: .01ms !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <div class="mark" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#1d4ed8" stroke-width="2"
+           stroke-linecap="round" stroke-linejoin="round">
+        <path d="M2 8.8a16 16 0 0 1 20 0" opacity=".35" />
+        <path d="M5 12.5a11 11 0 0 1 14 0" opacity=".6" />
+        <path d="M8.5 16.1a6 6 0 0 1 7 0" />
+        <circle cx="12" cy="20" r="1" fill="#1d4ed8" />
+        <path d="M3 3l18 18" stroke="#b91c1c" />
+      </svg>
+    </div>
+
+    <h1>インターネットに つながっていません</h1>
+    <p>電波の届くところに移動するか、Wi-Fi を確かめてから、もういちど開いてください。</p>
+    <p class="hint">
+      登録した服の写真と着用の記録は、この端末の中に残っています。<br />
+      つながれば、そのまま続きから使えます。
+    </p>
+
+    <a class="btn" href="./">もういちど ひらく</a>
+  </main>
+</body>
+</html>

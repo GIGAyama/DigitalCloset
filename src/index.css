@@ -2,22 +2,155 @@
 @tailwind components;
 @tailwind utilities;
 
-* {
-  -webkit-tap-highlight-color: transparent;
+/* ===========================================================================
+   GIGA Standard v5 Part I §2 — 表示の土台
+   =========================================================================== */
+
+:root {
+  /* セーフエリア（ノッチ・ホームバー・丸角）*/
+  --safe-t: env(safe-area-inset-top, 0px);
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  --safe-l: env(safe-area-inset-left, 0px);
+  --safe-r: env(safe-area-inset-right, 0px);
+
+  /* 文字サイズ。メディアクエリを何段も書かず clamp() で繋ぐ。
+     text-5xl のような固定サイズは 320px の端末ではみ出す。 */
+  --fs-body:  clamp(15px, 1.6vw + 10px, 17px);
+  --fs-lead:  clamp(17px, 2.2vw + 11px, 22px);
+  --fs-title: clamp(20px, 3.2vw + 12px, 30px);
+
+  /* 配色は固定する。個人の持ち物の写真を見るアプリなので、
+     端末側のダークモードで色が反転すると服の色が正しく見えない。 */
+  color-scheme: light;
 }
 
-.scrollbar-hide::-webkit-scrollbar {
-  display: none;
+html {
+  /* 端末の文字サイズ設定で勝手に拡大されるのを防ぐ（拡大操作は禁止しない）*/
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
+
+body {
+  font-size: var(--fs-body);
+  line-height: 1.7;
+  /* ダブルタップ拡大の 300ms 遅延を消す。
+     拡大そのものはピンチで従来どおりできる（user-scalable=no は使わない）。 */
+  touch-action: manipulation;
+}
+
+/* ---------------------------------------------------------------------------
+   画面の高さ。100vh はモバイルのアドレスバー分だけはみ出す。
+   dvh を先に書き、古い端末だけ @supports で受ける。
+   --------------------------------------------------------------------------- */
+.app-shell {
+  height: 100dvh;
+  /* 横向きのときのノッチ側の欠けを防ぐ */
+  padding-left: var(--safe-l);
+  padding-right: var(--safe-r);
+}
+@supports not (height: 100dvh) {
+  .app-shell { height: 100vh; }
+}
+
+/* 下部固定ナビはホームバー分を必ず足す。
+   env() をそのまま使うと、ホームバーの無い端末で余白が 0 になり詰まって見えるので
+   最低 8px は確保する。 */
+.pb-safe {
+  padding-bottom: calc(8px + var(--safe-b));
+}
+
+/* ---------------------------------------------------------------------------
+   タッチと操作
+   --------------------------------------------------------------------------- */
+* { -webkit-tap-highlight-color: transparent; }
+
+/* 引っぱり更新の暴発を防ぐ */
+.scroll-area { overscroll-behavior: contain; }
+
+.scrollbar-hide::-webkit-scrollbar { display: none; }
 .scrollbar-hide {
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
 
-.pb-safe {
-  padding-bottom: env(safe-area-inset-bottom, 8px);
+/* キーボードで操作している人にだけ、はっきりした枠を出す */
+:focus-visible {
+  outline: 3px solid #1d4ed8;
+  outline-offset: 2px;
 }
 
+/* ---------------------------------------------------------------------------
+   タップ領域 44px（§2-9）
+
+   ボタンそのものを大きくして満たしてはいけない。
+   詰めて組んであるツールバーやカード上の小さなボタンに min-height: 44px を当てると
+   折り返しが起き、別の破綻を生む。疑似要素で当たり判定だけを広げる。
+   --------------------------------------------------------------------------- */
+/* ⚠️ @layer components に入れること。
+   素の .tap-44 { position: relative } を書くと、Tailwind の .absolute より
+   後ろに並ぶため位置指定を奪ってしまう。
+   実際、カードの隅に置いた「AIに相談」ボタンと、検索欄の「×」が
+   本来の位置から外れて左下へ落ちた。数字の計測（大きさ・コントラスト）では
+   気づけず、画面を見て初めて分かった。
+   components 層に置けば、utilities の .absolute が正しく勝つ。 */
+@layer components {
+  .tap-44 { position: relative; }
+  .tap-44::after {
+    content: "";
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 100%; height: 100%;
+    min-width: 44px; min-height: 44px;
+    /* 見た目は変えない。当たり判定だけを広げる */
+    pointer-events: auto;
+  }
+  /* 中身（アイコン・文字）が疑似要素の下に隠れないようにする */
+  .tap-44 > * { position: relative; z-index: 1; }
+}
+
+/* チェックボックスとラジオにはこの手が使えない（input は疑似要素を持てない）。
+   囲みの <label> 側で高さを確保する。 */
+label.tap-44-label {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+}
+
+/* ---------------------------------------------------------------------------
+   動きの配慮（§2-10）
+
+   ⚠️ .01ms であって 0 ではない。
+      0 にすると animation-fill-mode: forwards / both が効かなくなり、
+      このアプリが全画面で使っている .animate-in .fade-in の要素が
+      opacity: 0 のまま消える。「動きを止める」つもりが「中身を消す」ことになる。
+   --------------------------------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   ハイコントラストモード（§2-8）
+   背景色が無効化されても、押せることと境目が分かるようにする。
+   --------------------------------------------------------------------------- */
+@media (forced-colors: active) {
+  button,
+  [role="button"],
+  select,
+  input[type="file"] {
+    border: 2px solid ButtonText;
+  }
+  .fc-outline { border: 1px solid CanvasText; }
+}
+
+/* ---------------------------------------------------------------------------
+   アニメーション定義
+   --------------------------------------------------------------------------- */
 @keyframes fade-in {
   from { opacity: 0; }
   to { opacity: 1; }
@@ -52,24 +185,10 @@
   animation-timing-function: ease-out;
   animation-fill-mode: both;
 }
-.fade-in {
-  animation-name: fade-in;
-}
-.slide-in-from-bottom-2 {
-  animation-name: slide-in-from-bottom-2, fade-in;
-}
-.slide-in-from-bottom-4 {
-  animation-name: slide-in-from-bottom-4, fade-in;
-}
-.slide-in-from-right-4 {
-  animation-name: slide-in-from-right-4, fade-in;
-}
-.slide-in-from-top-2 {
-  animation-name: slide-in-from-top-2, fade-in;
-}
-.slide-in-from-top-5 {
-  animation-name: slide-in-from-top-5, fade-in;
-}
-.zoom-in-95 {
-  animation-name: zoom-in-95, fade-in;
-}
+.fade-in { animation-name: fade-in; }
+.slide-in-from-bottom-2 { animation-name: slide-in-from-bottom-2, fade-in; }
+.slide-in-from-bottom-4 { animation-name: slide-in-from-bottom-4, fade-in; }
+.slide-in-from-right-4 { animation-name: slide-in-from-right-4, fade-in; }
+.slide-in-from-top-2 { animation-name: slide-in-from-top-2, fade-in; }
+.slide-in-from-top-5 { animation-name: slide-in-from-top-5, fade-in; }
+.zoom-in-95 { animation-name: zoom-in-95, fade-in; }
