@@ -21,7 +21,9 @@ const ROOT = process.cwd();
 const TMP = mkdtempSync(join(tmpdir(), 'giga-gate-'));
 
 // 検査に要るものだけ複製する。node_modules と .git は要らない。
-for (const p of ['index.html', 'src', 'public', 'scripts', 'tools', 'LICENSE',
+// CNAME も写すこと。E1_MANIFEST_PATHS は「CNAME があるか」で正しい値が変わるため、
+// 写し忘れると独自ドメイン側の判定がまるごと検査されない。
+for (const p of ['index.html', 'src', 'public', 'scripts', 'tools', 'LICENSE', 'CNAME',
   '.gitignore', '.github', 'quality.config.json', 'README.md', 'MANUAL.md', 'AUDIT.md']) {
   if (existsSync(join(ROOT, p))) cpSync(join(ROOT, p), join(TMP, p), { recursive: true });
 }
@@ -78,8 +80,10 @@ const CASES = [
   { id: 'D9_TAP_HELPER', file: 'src/index.css', how: '.tap-44 の当たり判定を消す',
     mutate: (s) => s.replace('min-width: 44px; min-height: 44px;', 'min-width: 20px; min-height: 20px;') },
 
-  { id: 'E1_MANIFEST_PATHS', file: 'public/manifest.webmanifest', how: 'id/scope/start_url を "./" に戻す',
-    mutate: (s) => s.replace(/"\/DigitalCloset\/"/g, '"./"') },
+  // "./" は独自ドメインでの正しい値なので、もう壊れた形ではない。
+  // いまの壊れ方は、サブドメイン直下で配信するのにリポジトリ名の絶対パスが残っていること。
+  { id: 'E1_MANIFEST_PATHS', file: 'public/manifest.webmanifest', how: 'id/scope/start_url をリポジトリ名の絶対パスに戻す',
+    mutate: (s) => s.replace(/"\.\/"/g, '"/DigitalCloset/"') },
   { id: 'E2b_APPLE_ICON_DEDICATED', file: 'index.html', how: '透明を含む icon-192 を apple-touch-icon に流用する',
     mutate: (s) => s.replace('icons/apple-touch-icon.png', 'icons/icon-192.png') },
   { id: 'E3_INSTALL_HOOK', file: 'public/install-hook.js', how: 'install-hook.js を消す', mutate: null },

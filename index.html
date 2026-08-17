@@ -43,7 +43,7 @@
     React のバンドルより後だと合図を取りこぼし、
     通信が遅い端末で「インストール」ボタンが出なくなる。
   -->
-  <script src="/DigitalCloset/install-hook.js"></script>
+  <script src="./install-hook.js"></script>
 
   <!-- viewport-fit=cover はノッチ／ホームバー領域まで背景を伸ばすために必須。
        user-scalable=no と maximum-scale は書かない。
@@ -51,17 +51,17 @@
        誤ズームは CSS の touch-action で防いである。 -->
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 
-  <link rel="manifest" href="/DigitalCloset/manifest.webmanifest" />
+  <link rel="manifest" href="./manifest.webmanifest" />
   <meta name="theme-color" content="#1d4ed8" />
   <meta name="color-scheme" content="light" />
   <meta name="description" content="手持ちの服を写真で登録し、コーデ・着用記録・使用頻度をまとめて見渡せる、あなただけのクローゼット帳です。" />
 
-  <link rel="icon" type="image/png" href="/DigitalCloset/favicon.png" />
+  <link rel="icon" type="image/png" href="./favicon.png" />
   <!-- ⚠️ apple-touch-icon には透明を含む画像を指さない。
        iOS は透明部分を黒で埋めるため、ホーム画面でアイコンの四隅だけが黒く出る。
        icon-192.png は角丸の外が透明なので、流用してはいけない。
        tools/build-icons.mjs が透明を落とした専用の 180×180 を作っている。 -->
-  <link rel="apple-touch-icon" sizes="180x180" href="/DigitalCloset/icons/apple-touch-icon.png" />
+  <link rel="apple-touch-icon" sizes="180x180" href="./icons/apple-touch-icon.png" />
 
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="mobile-web-app-capable" content="yes" />

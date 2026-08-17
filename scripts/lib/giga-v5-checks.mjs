@@ -166,11 +166,18 @@ export function runGigaChecks(cfg) {
   try { manifest = manifestRaw ? JSON.parse(manifestRaw) : null; } catch { /* 壊れていれば下で落ちる */ }
   const repo = cfg.repoName;
 
+  // 正しい値は「どこで配信するか」で変わる。
+  // 独自ドメイン（CNAME あり）だとアプリは digitalcloset.giga-school.com の直下に置かれる。
+  // ここで /DigitalCloset/ のままにすると scope がページの URL を含まなくなり、
+  // manifest ごと無視されて PWA としてインストールできなくなる。
+  // CNAME が無ければ従来どおり共有オリジンのサブディレクトリ配信なので、
+  // リポジトリ名の絶対パスでないと同居する別アプリと取り違えられる。
+  const hasCname = existsSync('CNAME') || existsSync('public/CNAME');
+  const wantBase = hasCname ? './' : `/${repo}/`;
   add('E1_MANIFEST_PATHS', (() => {
     if (!manifest) return false;
-    const want = `/${repo}/`;
-    return manifest.id === want && manifest.scope === want && manifest.start_url === want;
-  })(), `manifest の id / scope / start_url が /${repo}/ の絶対パスであること`);
+    return manifest.id === wantBase && manifest.scope === wantBase && manifest.start_url === wantBase;
+  })(), `manifest の id / scope / start_url が ${wantBase} であること`);
 
   add('E2_ICONS', ['icon-192', 'icon-512', 'maskable-192', 'maskable-512', 'apple-touch-icon']
     .every((n) => existsSync(`public/icons/${n}.png`)),
