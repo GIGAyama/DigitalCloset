@@ -10,7 +10,7 @@
  *   - 他アプリのキャッシュを巻き添えにしないか
  *   - 圏外で起動するか／本体が無ければ offline.html が出るか
  *
- * 使い方: node tools/measure-pwa.mjs [--url http://127.0.0.1:4173/DigitalCloset/]
+ * 使い方: node tools/measure-pwa.mjs [--url http://127.0.0.1:4173/]
  */
 import { createRequire } from 'node:module';
 import { readFileSync, writeFileSync, copyFileSync, existsSync, statSync } from 'node:fs';
@@ -27,7 +27,10 @@ try {
 }
 
 const SW_FILE = 'dist/sw.js';
-const BASE = '/DigitalCloset/';
+// 本番と同じ「ドメイン直下」で配る。独自ドメイン digitalcloset.giga-school.com では
+// アプリがドメイン直下に置かれるので、旧構成の '/DigitalCloset/' の下で配ると、
+// 本番では 404 になるパスが測定環境でだけ通り、壊れていても「合格」と出る。
+const BASE = '/';
 
 // ---------------------------------------------------------------------------
 // 配信サーバーは、このスクリプトが自分で起こす。
