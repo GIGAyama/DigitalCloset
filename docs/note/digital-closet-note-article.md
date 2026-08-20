@@ -16,7 +16,7 @@
 
 ひらくのはこちらです。
 
-https://gigayama.github.io/DigitalCloset/
+https://digitalcloset.giga-school.com/
 
 会員登録もログインもありません。ひらいたその場から使えます。
 
@@ -192,7 +192,7 @@ AI の機能を使うときだけ、外へ問い合わせが出ます。宛先�
 
 はじめの一着を登録するところまでを書きます。
 
-1. https://gigayama.github.io/DigitalCloset/ をひらきます
+1. https://digitalcloset.giga-school.com/ をひらきます
 2. 右上の「＋」を押します
 3. 「カメラ」でその場で撮るか、「写真を選択」で端末の写真から選びます
 4. 名前を入れます。ここだけは必ず要ります

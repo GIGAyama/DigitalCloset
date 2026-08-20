@@ -5,7 +5,7 @@
 
 専門の知識は要りません。スマホでもパソコンでも使えます。
 
-**ひらく → <https://gigayama.github.io/DigitalCloset/>**
+**ひらく → <https://digitalcloset.giga-school.com/>**
 
 ---
 

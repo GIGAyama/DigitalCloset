@@ -36,7 +36,7 @@ try {
 
 const URL_ARG = process.argv.includes('--url')
   ? process.argv[process.argv.indexOf('--url') + 1]
-  : 'http://localhost:4173/DigitalCloset/';
+  : 'http://localhost:4173/';
 
 // ---------------------------------------------------------------------------
 // ページの中で走らせる走査コード。

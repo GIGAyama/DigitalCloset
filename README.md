@@ -3,7 +3,7 @@
 手持ちの服を写真で登録し、コーデ・着用記録・使用頻度をまとめて見渡せる、
 あなただけのクローゼット帳です。
 
-- 公開先: `https://gigayama.github.io/DigitalCloset/`
+- 公開先: `https://digitalcloset.giga-school.com/`
 - 使い方は **[MANUAL.md](./MANUAL.md)**
 - 品質の実測値は **[AUDIT.md](./AUDIT.md)**
 - 導入したときの記録は **[ROLLOUT.md](./ROLLOUT.md)**
@@ -175,7 +175,7 @@ npm run measure:csp                     # 同上
 
 ### 同一オリジンを共有している
 
-`gigayama.github.io` は数十個のアプリが**同じオリジンを共有**しています。そのため:
+旧配信元の `gigayama.github.io` は数十個のアプリが**同じオリジンを共有**していました。同居する配置に戻したときのため:
 
 - `manifest` の `id` / `scope` / `start_url` は
   **`/DigitalCloset/` の絶対パス**にしてあります。省略すると別アプリと取り違えられます

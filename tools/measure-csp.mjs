@@ -22,7 +22,10 @@ try {
   ({ chromium } = await import(`${root}/playwright/index.mjs`));
 }
 
-const BASE = '/DigitalCloset/';
+// 本番と同じ「ドメイン直下」で配る。独自ドメイン digitalcloset.giga-school.com では
+// アプリがドメイン直下に置かれるので、旧構成の '/DigitalCloset/' の下で配ると、
+// 本番では 404 になるパスが測定環境でだけ通り、壊れていても「合格」と出る。
+const BASE = '/';
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8',
