@@ -292,5 +292,5 @@ AI に相談したときに「好みの傾向」として参考にされます�
 
 ---
 
-困ったことがあれば [GIGA山](https://note.com/cute_borage86) まで。
+困ったことがあれば [GIGA山](https://giga-school.com) まで。
 </content>
