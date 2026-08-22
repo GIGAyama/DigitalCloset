@@ -1,9 +1,8 @@
 {
-  "files": [],
-  "unmanaged": [
+  "files": [
     {
-      "local": "scripts/lib/giga-v5-checks.mjs",
-      "reason": "304行のフォーク。検査IDの体系と quality.config.json の書式が正本と違うため、コピーし直しでは移行できない。いちばん効く「版ずれの検出」は正本と同じ __APP_VERSION__ 方式で働いているので、移行は急がない（standards/docs/gate-forks.md、2026-08-22）"
+      "canonical": "lib/giga-v5-checks.mjs",
+      "local": "scripts/lib/giga-v5-checks.mjs"
     }
   ]
 }

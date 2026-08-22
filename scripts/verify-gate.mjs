@@ -29,6 +29,14 @@ for (const p of ['index.html', 'src', 'public', 'scripts', 'tools', 'LICENSE', '
 }
 
 const { runGigaChecks } = await import(`file://${join(TMP, 'scripts/lib/giga-v5-checks.mjs')}`);
+const { runLocalChecks } = await import(`file://${join(TMP, 'scripts/lib/local-checks.mjs')}`);
+
+// 正本は (root, config) を、ローカルは (cfg) を取る。呼び分けたうえで
+// 1つの一覧にまとめる。id だけ見れば済むよう ok/skipped もそろえる。
+const runAll = (dir, cfg) => [
+  ...runGigaChecks(dir, cfg.standard).map((r) => ({ id: r.id, ok: r.ok || !!r.skipped })),
+  ...runLocalChecks(cfg).map((r) => ({ id: r.id, ok: r.ok })),
+];
 const cfg = JSON.parse(readFileSync(join(ROOT, 'quality.config.json'), 'utf8'));
 
 /**
@@ -36,83 +44,91 @@ const cfg = JSON.parse(readFileSync(join(ROOT, 'quality.config.json'), 'utf8'));
  * expect には「その壊し方で落ちてほしい検査の id」を書く。
  */
 const CASES = [
-  { id: 'A1_LICENSE', file: 'LICENSE', how: 'LICENSE を消す', mutate: null },
-  { id: 'A3_DEPENDABOT', file: '.github/dependabot.yml', how: 'dependabot.yml を消す', mutate: null },
-  { id: 'A5_CI_ON_PR', file: '.github/workflows/ci.yml', how: 'CI から pull_request を外す',
+  { id: 'A_LICENSE', file: 'LICENSE', how: 'LICENSE を消す', mutate: null },
+  { id: 'A_DEPENDABOT', file: '.github/dependabot.yml', how: 'dependabot.yml を消す', mutate: null },
+  { id: 'A_CI_ON_PR', file: '.github/workflows/ci.yml', how: 'CI から pull_request を外す',
     mutate: (s) => s.replace(/^\s*pull_request:\s*$/m, '') },
-  { id: 'A4_DOCS', file: 'MANUAL.md', how: 'MANUAL.md を消す', mutate: null },
+  { id: 'A_DOCS', file: 'MANUAL.md', how: 'MANUAL.md を消す', mutate: null },
 
-  { id: 'B1_CSP', file: 'index.html', how: 'CSP の meta を丸ごと外す',
+  { id: 'B_CSP', file: 'index.html', how: 'CSP の meta を丸ごと外す',
     mutate: (s) => s.replace(/<meta http-equiv="Content-Security-Policy"[\s\S]*?\/>/, '') },
-  { id: 'B1b_CSP_NO_UNSAFE_INLINE_SCRIPT', file: 'index.html', how: "script-src に 'unsafe-inline' を足す",
+  { id: 'B_CSP', file: 'index.html', how: "script-src に 'unsafe-inline' を足す",
     mutate: (s) => s.replace("script-src 'self';", "script-src 'self' 'unsafe-inline';") },
-  { id: 'B1c_CSP_NO_FRAME_ANCESTORS', file: 'index.html', how: 'frame-ancestors を meta に書く',
+  { id: 'B_CSP', file: 'index.html', how: 'frame-ancestors を meta に書く',
     mutate: (s) => s.replace("script-src 'self';", "frame-ancestors 'none';\n    script-src 'self';") },
-  { id: 'B2_NO_SECRETS', file: 'src/App.jsx', how: 'API キーらしき文字列を直書きする',
+  { id: 'B_NO_SECRETS', file: 'src/App.jsx', how: 'API キーらしき文字列を直書きする',
     mutate: (s) => s.replace('const DEFAULT_GEMINI_MODEL', "const LEAKED = 'AIzaSyA1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r';\nconst DEFAULT_GEMINI_MODEL") },
-  { id: 'B6_NO_CDN_RUNTIME', file: 'index.html', how: 'ブラウザ内 Babel を CDN から読ませる',
+  { id: 'B_NO_CDN_CODE', file: 'index.html', how: 'ブラウザ内 Babel を CDN から読ませる',
     mutate: (s) => s.replace('</head>', '  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>\n</head>') },
-  { id: 'B4_POSTMESSAGE', file: 'src/App.jsx', how: "postMessage の宛先を '*' にする",
+  { id: 'C_NO_POSTMESSAGE_STAR', file: 'src/App.jsx', how: "postMessage の宛先を '*' にする",
     mutate: (s) => s.replace('export default function App', "function leak(w){ w.postMessage({a:1}, '*'); }\nexport default function App") },
 
-  { id: 'C3_PAGEHIDE', file: 'src/App.jsx', how: 'pagehide の登録を外す',
+  { id: 'C_PAGEHIDE', file: 'src/App.jsx', how: 'pagehide の登録を外す',
     mutate: (s) => s.replace("window.addEventListener('pagehide', flush);", '') },
-  { id: 'C5_NO_LS_CLEAR', file: 'src/App.jsx', how: 'localStorage.clear() を使う',
+  { id: 'C_NO_LS_CLEAR', file: 'src/App.jsx', how: 'localStorage.clear() を使う',
     mutate: (s) => s.replace('const showToast =', 'const wipe = () => { localStorage.clear(); };\n  const showToast =') },
 
-  { id: 'D1_VIEWPORT_FIT', file: 'index.html', how: 'viewport から viewport-fit=cover を外す',
+  { id: 'D_VIEWPORT', file: 'index.html', how: 'viewport から viewport-fit=cover を外す',
     mutate: (s) => s.replace(', viewport-fit=cover', '') },
-  { id: 'D14_NO_ZOOM_BLOCK', file: 'index.html', how: '拡大を禁止する（注意書きではなく実際の指定として）',
+  { id: 'D_VIEWPORT', file: 'index.html', how: '拡大を禁止する（注意書きではなく実際の指定として）',
     mutate: (s) => s.replace('content="width=device-width, initial-scale=1.0, viewport-fit=cover"',
       'content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover"') },
-  { id: 'D2_DVH', file: 'src/index.css', how: '@supports の外で 100vh を使う',
-    mutate: (s) => s.replace('.app-shell {\n  height: 100dvh;', '.app-shell {\n  height: 100vh;\n  height: 100dvh;') },
-  { id: 'D3_SAFE_AREA', file: 'src/index.css', how: 'safe-area-inset をすべて外す',
+  // ⚠️ 正本は「前後250文字に 100dvh があれば、古いブラウザ向けのひかえ」と見る。
+  //    dvh のすぐ隣に 100vh を足す壊し方では落ちない（それは正しい書き方だから）。
+  //    ひかえの無い 100vh を、dvh から離れた場所に足す。
+  { id: 'D_DVH', file: 'src/index.css', how: 'ひかえ無しの 100vh を離れた場所に足す',
+    mutate: (s) => s + '\n.__probe { height: 100vh; }\n' },
+  { id: 'D_SAFE_AREA', file: 'src/index.css', how: 'safe-area-inset をすべて外す',
     mutate: (s) => s.replace(/env\(safe-area-inset-[a-z]+, 0px\)/g, '0px') },
-  { id: 'D4_FLUID_TYPE', file: 'src/index.css', how: 'clamp() をやめて固定 px にする',
+  { id: 'D_FLUID_TYPE', file: 'src/index.css', how: 'clamp() をやめて固定 px にする',
     mutate: (s) => s.replace(/clamp\([^)]*\)/g, '16px') },
-  { id: 'D7_IMG_DIMENSIONS', file: 'src/App.jsx', how: '<img> から width/height を外す',
+  { id: 'F_IMG_DIMENSIONS', file: 'src/App.jsx', how: '<img> から width/height を外す',
     mutate: (s) => s.replace('width={64} height={64} decoding="async" className="h-16 w-16', 'className="h-16 w-16') },
-  { id: 'D10_REDUCED_MOTION', file: 'src/index.css', how: 'reduced-motion を .01ms ではなく 0 にする',
+  { id: 'D_REDUCED_MOTION', file: 'src/index.css', how: 'reduced-motion を .01ms ではなく 0 にする',
     mutate: (s) => s.replace('animation-duration: .01ms !important;', 'animation-duration: 0s !important;') },
-  { id: 'D11_FORCED_COLORS', file: 'src/index.css', how: 'forced-colors 対応を消す',
+  { id: 'D_FORCED_COLORS', file: 'src/index.css', how: 'forced-colors 対応を消す',
     mutate: (s) => s.replace('@media (forced-colors: active)', '@media (min-width: 99999px)') },
   { id: 'D9_TAP_HELPER', file: 'src/index.css', how: '.tap-44 の当たり判定を消す',
     mutate: (s) => s.replace('min-width: 44px; min-height: 44px;', 'min-width: 20px; min-height: 20px;') },
 
   // "./" は独自ドメインでの正しい値なので、もう壊れた形ではない。
   // いまの壊れ方は、サブドメイン直下で配信するのにリポジトリ名の絶対パスが残っていること。
-  { id: 'E1_MANIFEST_PATHS', file: 'public/manifest.webmanifest', how: 'id/scope/start_url をリポジトリ名の絶対パスに戻す',
+  { id: 'E_MANIFEST_ID', file: 'public/manifest.webmanifest', how: 'id/scope/start_url をリポジトリ名の絶対パスに戻す',
     mutate: (s) => s.replace(/"\.\/"/g, '"/DigitalCloset/"') },
-  { id: 'E2b_APPLE_ICON_DEDICATED', file: 'index.html', how: '透明を含む icon-192 を apple-touch-icon に流用する',
+  { id: 'E_ICONS', file: 'index.html', how: '透明を含む icon-192 を apple-touch-icon に流用する',
     mutate: (s) => s.replace('icons/apple-touch-icon.png', 'icons/icon-192.png') },
-  { id: 'E3_INSTALL_HOOK', file: 'public/install-hook.js', how: 'install-hook.js を消す', mutate: null },
-  { id: 'E5_SW_CACHE_SCOPED', file: 'public/sw.js',
+  // 正本の E_INSTALL_HOOK は「<head> で合図を受けているか」を見る。
+  // ファイルを消しても index.html は変わらないので、読み込みの行を外す。
+  // ファイルそのものの有無は E3b_INSTALL_HOOK_FILE（ローカル）が見る。
+  { id: 'E_INSTALL_HOOK', file: 'index.html', how: 'install-hook.js の読み込みを外す',
+    mutate: (s) => s.replace(/\s*<script src="\.\/install-hook\.js"><\/script>/, '') },
+  { id: 'E3b_INSTALL_HOOK_FILE', file: 'public/install-hook.js', how: 'install-hook.js を消す', mutate: null },
+  { id: 'E_SW_CACHE_SCOPE', file: 'public/sw.js',
     how: 'caches.keys() を全部消す形にする（アロー関数で書いて正規表現から隠す）',
     mutate: (s) => s.replace(
       /const keys = await caches\.keys\(\);[\s\S]*?\.map\(\(k\) => caches\.delete\(k\)\)\);/,
       'const keys = await caches.keys();\n  await Promise.all(keys.map((k) => caches.delete(k)));') },
-  { id: 'E6_SW_NO_LOCALSTORAGE', file: 'public/sw.js', how: 'sw.js から localStorage を触る',
+  { id: 'E_SW_NO_LOCALSTORAGE', file: 'public/sw.js', how: 'sw.js から localStorage を触る',
     mutate: (s) => s.replace("if (e.data && e.data.type === 'SKIP_WAITING')",
       "self.localStorage;\n  if (e.data && e.data.type === 'SKIP_WAITING')") },
-  { id: 'E7_SW_NO_SKIPWAITING_IN_INSTALL', file: 'public/sw.js', how: 'install の中で skipWaiting() する',
+  { id: 'E_SW_NO_SKIP_WAITING_ON_INSTALL', file: 'public/sw.js', how: 'install の中で skipWaiting() する',
     mutate: (s) => s.replace('  // ここでは skipWaiting しない。', '  self.skipWaiting();\n  // ここでは skipWaiting しない。') },
-  { id: 'E9_SW_REGISTER_READYSTATE', file: 'src/pwa.js', how: 'readyState の分岐を外して load だけ待つ',
+  { id: 'E_SW_REGISTER_READYSTATE', file: 'src/pwa.js', how: 'readyState の分岐を外して load だけ待つ',
     mutate: (s) => s.replace(/if \(document\.readyState === 'complete'\) start\(\);\s*\n\s*else /, '') },
-  { id: 'E7b_CONTROLLERCHANGE_GUARDED', file: 'src/pwa.js', how: 'controllerchange を素直に受ける',
-    mutate: (s) => s.replace('if (!userAskedUpdate || reloading) return;', 'if (reloading) return;')
-      .replace(/let userAskedUpdate = false;/, 'let unusedFlag = false;')
-      .replace(/userAskedUpdate = true;/, 'unusedFlag = true;') },
-  { id: 'E10_OFFLINE_HTML', file: 'public/offline.html', how: 'offline.html に JavaScript を足す',
+  // ⚠️ 正本は「reload の手前に return があるか」も見はりと数える。
+  //    reloading だけ残す壊し方では return が残るので落ちない。丸ごと外す。
+  { id: 'E_SW_UPDATE_PROMPT', file: 'src/pwa.js', how: 'controllerchange を見はり無しで受ける',
+    mutate: (s) => s.replace('if (!userAskedUpdate || reloading) return;\n    reloading = true;', '') },
+  { id: 'E_OFFLINE_HTML', file: 'public/offline.html', how: 'offline.html に JavaScript を足す',
     mutate: (s) => s.replace('</body>', '<script>console.log(1)</script>\n</body>') },
-  { id: 'E11_APP_VERSION_GENERATED', file: 'public/sw.js', how: 'APP_VERSION を手書きに戻す',
+  { id: 'E_SW_VERSION_GENERATED', file: 'public/sw.js', how: 'APP_VERSION を手書きに戻す',
     mutate: (s) => s.replace("const APP_VERSION = 'dev'; /* __APP_VERSION__ */", "const APP_VERSION = 'v1';") },
 
   { id: 'F2_MODAL_A11Y', file: 'src/App.jsx', how: 'モーダルから Esc の処理を外す',
     mutate: (s) => s.replace("if (e.key === 'Escape')", 'if (false)') },
-  { id: 'F4_RT_COLOR', file: 'src/index.css', how: 'rt の色を決め打ちする',
+  { id: 'D_RT_COLOR', file: 'src/index.css', how: 'rt の色を決め打ちする',
     mutate: (s) => s + '\nrt { color: #666; }\n' },
-  { id: 'P_FAVICON_SIZE', file: 'public/favicon.png', how: 'favicon を 30KB 超にする',
+  { id: 'F_IMG_SIZE', file: 'public/favicon.png', how: 'favicon を 30KB 超にする',
     mutate: () => Buffer.alloc(40 * 1024, 1), binary: true },
 ];
 
@@ -147,7 +163,7 @@ for (const c of CASES) {
 
   // 壊した状態で検査を走らせる
   process.chdir(TMP);
-  const results = runGigaChecks(cfg);
+  const results = runAll('.', cfg);
   process.chdir(ROOT);
 
   const hit = results.find((r) => r.id === c.id);
@@ -170,7 +186,7 @@ for (const c of CASES) {
 
 // 壊していない状態では全部通ること（直し忘れの検出も兼ねる）
 process.chdir(TMP);
-const clean = runGigaChecks(cfg).filter((r) => !r.ok);
+const clean = runAll('.', cfg).filter((r) => !r.ok);
 process.chdir(ROOT);
 if (clean.length) {
   problems.push(`❌ 壊していない状態で落ちている: ${clean.map((r) => r.id).join(', ')}`);

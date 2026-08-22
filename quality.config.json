@@ -23,5 +23,34 @@
     "studyLog": "学習系アプリではないため study.v1 の対象外",
     "gasGuards": "サーバーを持たない。データは端末内の IndexedDB のみ",
     "sri": "外部から読み込む実行コードが 0 バイトのため対象が無い"
+  },
+  "standard": {
+    "//": "正本 GIGAyama.github.io/standards/lib/giga-v5-checks.mjs に渡す設定。",
+    "repoName": "DigitalCloset",
+    "sw": "vite",
+    "swSource": "public/sw.js",
+    "swVersionConst": "APP_VERSION",
+    "manifest": "public/manifest.webmanifest",
+    "//siteRoot": "Vite 型なので public/ の中身が配信の直下に来る。ここを書かないと offline.html とアイコンを「ありません」と誤検知する。",
+    "siteRoot": "public",
+    "jsDirs": [
+      "src"
+    ],
+    "cssDirs": [
+      "src"
+    ],
+    "htmlFiles": [
+      "index.html",
+      "public/offline.html"
+    ],
+    "imageDirs": [
+      "public"
+    ],
+    "skips": [
+      {
+        "id": "D_CANVAS_DPR",
+        "reason": "src/App.jsx の canvas は compressImage が画像を縮めるために使う画面外のもので、toDataURL に渡して捨てる。画面に描かないので devicePixelRatio の補正は意味を持たない（2026-08-22）"
+      }
+    ]
   }
 }
