@@ -853,7 +853,32 @@ export const CHECKS = [
       //    先読みの配列（[ … ] の中）に入っていることを見る。
       const inArray = [...code.matchAll(/\[[\s\S]{0,4000}?\]/g)]
         .some((m) => /offline\.html/.test(m[0]));
-      return { ok: inArray, detail: ['offline.html を先読みの一覧に入れていません。圏外では出せません'] };
+      if (inArray) return { ok: true, detail: [] };
+
+      // ⚠️ ビルドで一覧を注入する型では、原文の配列を見ても真偽が決まらない。
+      //    tools/build-sw.mjs が /* __PRECACHE_URLS__ */ の行を実ファイル名で
+      //    書き替えるので、原文はただの置き場である。そこに種の一覧を書いて
+      //    あるリポジトリ（digitalcloset）は偶然通り、空の [] にしてある
+      //    リポジトリ（quoridor）は正しく先読みしているのに落ちていた。
+      //    真偽が決まるのは sw-build.config.json の precache のほうなので、
+      //    置き場だと分かるときはそちらを見る。
+      const isPlaceholder = /__PRECACHE_URLS__/.test(src);
+      if (isPlaceholder) {
+        const cfgSrc = read(root, 'sw-build.config.json');
+        if (!cfgSrc) {
+          return { ok: false, detail: ['先読み一覧はビルドで注入する形ですが、sw-build.config.json がありません'] };
+        }
+        let precache;
+        try { precache = JSON.parse(cfgSrc).precache; } catch { precache = null; }
+        if (!Array.isArray(precache)) {
+          return { ok: false, detail: ['sw-build.config.json に precache の一覧がありません'] };
+        }
+        return {
+          ok: precache.some((e) => /offline\.html/.test(e)),
+          detail: ['sw-build.config.json の precache に offline.html を入れていません。圏外では出せません'],
+        };
+      }
+      return { ok: false, detail: ['offline.html を先読みの一覧に入れていません。圏外では出せません'] };
     },
   },
   {
@@ -970,7 +995,8 @@ function rgbaHasTransparency(buf) {
     i += 12 + len;
   }
   let raw;
-  try { raw = zlib.inflateSync(idat); } catch (e) { return true; }
+  // 読めないときは安全側（透明あり）に倒す。例外の中身は使わないので受けない
+  try { raw = zlib.inflateSync(idat); } catch { return true; }
   const stride = w * ch;
   const out = Buffer.alloc(h * stride);
   let pos = 0;
