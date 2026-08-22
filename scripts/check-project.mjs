@@ -1,48 +1,60 @@
 #!/usr/bin/env node
 /**
- * GIGA Standard v5 品質ゲート。
+ * 品質ゲート。CI と同じものを手元でも回せる。
  *
- * CI（.github/workflows/ci.yml）と手元で同じものを走らせる。
  *   npm run check
  *
- * ここが見るのは「読めば分かること」だけである。
- * コントラスト・タップ領域・PWA の挙動・CSP が効いているかは読んでも分からないので、
- * tools/measure.mjs / measure-pwa.mjs / measure-csp.mjs で実ブラウザから測る。
- * このゲートが通ったことを「測った」と言わないこと。
+ * 構成:
+ *   scripts/lib/giga-v5-checks.mjs … 共通の検査の【正本】。
+ *     GIGAyama.github.io/standards/lib/ からのコピーで、ここでは手を入れない。
+ *     直すときは正本を直してから配る（drift ジョブがずれを見張っている）。
+ *   scripts/lib/local-checks.mjs   … このリポジトリだけの検査。
+ *
+ * ここは「読めば分かること」だけを見る。コントラスト・タップ領域・
+ * PWA の挙動・CSP が効いているかは読んでも分からないので
+ * tools/measure*.mjs で実ブラウザから測る。
+ * 静的検査が通ったことを「測った」と言わないこと。
+ *
+ * ⚠️ 検査そのものが壊れていないかは scripts/verify-gate.mjs が確かめる。
+ *    「0件でした」だけでは、効いているのか何も見ていないのか区別できない。
  */
-import { readFileSync, existsSync } from 'node:fs';
-import { runGigaChecks, runBuildChecks } from './lib/giga-v5-checks.mjs';
+import { readFileSync } from 'node:fs';
+import { runGigaChecks } from './lib/giga-v5-checks.mjs';
+import { runLocalChecks, runBuildChecks } from './lib/local-checks.mjs';
 
 const cfg = JSON.parse(readFileSync('quality.config.json', 'utf8'));
 
-const results = [...runGigaChecks(cfg), ...runBuildChecks(cfg)];
-const failed = results.filter((r) => !r.ok && r.severity !== 'warn');
-const warned = results.filter((r) => !r.ok && r.severity === 'warn');
+// 正本は { id, title, ok, detail, skipped } を返す。ローカルは
+// { id, message, ok, severity }。出力をそろえてから並べる。
+const fromCanonical = runGigaChecks('.', cfg.standard).map((r) => ({
+  id: r.id,
+  ok: r.ok,
+  message: r.title,
+  detail: r.detail || [],
+  skipped: r.skipped,
+  severity: 'error',
+}));
+const fromLocal = [...runLocalChecks(cfg), ...runBuildChecks(cfg)]
+  .map((r) => ({ ...r, detail: [] }));
+
+const results = [...fromCanonical, ...fromLocal];
+const failed = results.filter((r) => !r.ok && !r.skipped && r.severity !== 'warn');
+const warned = results.filter((r) => !r.ok && !r.skipped && r.severity === 'warn');
 
 for (const r of results) {
-  if (r.ok) console.log(`  ✅ ${r.id.padEnd(32)} ${r.message}`);
+  const mark = r.skipped ? '－' : r.ok ? '✅' : (r.severity === 'warn' ? '⚠️' : '❌');
+  console.log(`  ${mark} ${r.id.padEnd(34)} ${r.message}`);
+  for (const d of r.detail) console.log(`       ↳ ${d}`);
 }
-for (const r of warned) console.log(`  ⚠️  ${r.id.padEnd(32)} ${r.message}`);
-for (const r of failed) console.log(`  ❌ ${r.id.padEnd(32)} ${r.message}`);
 
-console.log(`\n${results.length - failed.length - warned.length}/${results.length} 項目`);
-
-if (!existsSync('dist')) {
-  console.log('※ dist/ が無いため、ビルド成果物の検査（初回JS・総アセット・sw.js の版）は走っていません。');
-  console.log('  npm run build のあとに npm run check を走らせると全項目が動きます。');
-}
+const ran = results.filter((r) => !r.skipped).length;
+console.log(`\n合計 ${results.length} 件： 合格 ${ran - failed.length - warned.length} / 不合格 ${failed.length} / 対象外 ${results.length - ran}`);
 
 console.log('\n【この検査が見ていないもの】測っていないものを ✅ と書かないための控え');
-for (const line of [
-  'コントラスト比（実ブラウザで全画面を走査：tools/measure.mjs）',
-  'タップ領域 44px（疑似要素込みで実測：tools/measure.mjs）',
-  'PWA の挙動（登録・初回リロード・更新・他アプリのキャッシュ・圏外：tools/measure-pwa.mjs）',
-  'CSP が実際に効いているか（tools/measure-csp.mjs）',
-  'maskable のセーフゾーン（tools/build-icons.mjs が生成時に画素で数える）',
-]) console.log(`  ・${line}`);
+console.log('  ・コントラスト比（実ブラウザで全画面を走査：tools/measure.mjs）');
+console.log('  ・タップ領域 44px（疑似要素込みで実測：tools/measure.mjs）');
+console.log('  ・PWA の挙動（登録・初回リロード・更新・圏外：tools/measure-pwa.mjs）');
+console.log('  ・CSP が実際に効いているか（tools/measure-csp.mjs）');
 
-if (failed.length) {
-  console.log(`\n❌ ${failed.length} 件が基準を満たしていません。`);
-  process.exit(1);
-}
+if (failed.length) process.exit(1);
 console.log('\n✅ 静的検査はすべて通りました。');
