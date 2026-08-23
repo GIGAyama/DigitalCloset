@@ -92,6 +92,11 @@ const DEFAULTS = {
   // ここを見ないとファイルの実体を取りちがえる（実際 digitalcloset で
   // offline.html とアイコン3件が「ありません」と誤検知した）。
   siteRoot: '.',
+  // 入口のページ。多くのリポジトリは直下の index.html だが、GitHub Pages を
+  // docs/ から配るリポジトリ（SchoolPlan_Editor）は 'docs/index.html' になる。
+  // ここを決め打ちにしていたせいで、そういうリポジトリでは CSP も viewport も
+  // インストールの合図も「index.html がありません」で落ちていた（2026-08-23）。
+  entryHtml: 'index.html',
   jsDirs: ['js'],
   cssDirs: ['css'],
   htmlFiles: ['index.html', 'offline.html'],
@@ -335,8 +340,8 @@ export const CHECKS = [
   {
     id: 'B_CSP',
     title: 'CSP があり、script-src がしまっている',
-    run: (root) => {
-      const s = read(root, 'index.html');
+    run: (root, cfg) => {
+      const s = read(root, cfg.entryHtml);
       if (!s) return { ok: false, detail: ['index.html がありません'] };
       const m = s.match(/http-equiv=["']Content-Security-Policy["'][^>]*content=["']([\s\S]*?)["']\s*\/?>/i);
       if (!m) return { ok: false, detail: ['CSP の <meta> がありません'] };
@@ -353,8 +358,8 @@ export const CHECKS = [
   {
     id: 'B_NO_INLINE_SCRIPT',
     title: 'index.html にインラインの <script> と onclick= がない',
-    run: (root) => {
-      const s = read(root, 'index.html');
+    run: (root, cfg) => {
+      const s = read(root, cfg.entryHtml);
       if (!s) return { ok: false, detail: ['index.html がありません'] };
       // コメントの中の例示に反応しないよう、HTML コメントを落としてから見る
       const html = s.replace(/<!--[\s\S]*?-->/g, '');
@@ -407,8 +412,8 @@ export const CHECKS = [
   {
     id: 'D_VIEWPORT',
     title: 'viewport が viewport-fit=cover で、拡大を禁止していない',
-    run: (root) => {
-      const s = read(root, 'index.html');
+    run: (root, cfg) => {
+      const s = read(root, cfg.entryHtml);
       const m = s && s.match(/<meta\s+name=["']viewport["'][^>]*content=["']([^"']+)["']/i);
       if (!m) return { ok: false, detail: ['viewport の <meta> がありません'] };
       const bad = [];
@@ -540,7 +545,7 @@ export const CHECKS = [
      */
     run: (root, cfg) => {
       const bad = [];
-      const sources = ['index.html', ...jsFiles(root, cfg)];
+      const sources = [cfg.entryHtml, ...jsFiles(root, cfg)];
       for (const rel of sources) {
         const src = read(root, rel);
         if (src === null) continue;
@@ -638,7 +643,7 @@ export const CHECKS = [
       if (!cfg.repoName) return { ok: false, detail: ['quality.config.json に repoName がありません（この検査に必要です）'] };
       const stale = `/${cfg.repoName}/`;
       const bad = [];
-      const targets = ['index.html', 'offline.html', cfg.manifest, swSourceOf(cfg), ...jsFiles(root, cfg)];
+      const targets = [...cfg.htmlFiles, cfg.manifest, swSourceOf(cfg), ...jsFiles(root, cfg)];
       for (const rel of new Set(targets)) {
         const s = read(root, rel);
         if (!s) continue;
@@ -666,7 +671,7 @@ export const CHECKS = [
       if (!has('192x192', 'maskable')) bad.push('192 の maskable がありません');
       if (!has('512x512', 'maskable')) bad.push('512 の maskable がありません');
 
-      const html = read(root, 'index.html') || '';
+      const html = read(root, cfg.entryHtml) || '';
       const m = html.replace(/<!--[\s\S]*?-->/g, '').match(/rel=["']apple-touch-icon["'][^>]*href=["']([^"']+)["']/i);
       if (!m) bad.push('apple-touch-icon がありません');
       else {
@@ -681,12 +686,12 @@ export const CHECKS = [
   {
     id: 'E_INSTALL_HOOK',
     title: 'インストールの合図を <head> のいちばん先で受け取っている',
-    run: (root) => {
+    run: (root, cfg) => {
       // Chrome は条件がそろうと即座に beforeinstallprompt を出す。
       // 本体の JS より後だと合図を取りこぼし、通信が遅い端末で
       // 「インストール」ボタンが出なくなる。install-hook.js を
       // <head> で（本体より先に）読むのが決まった形。
-      const html = read(root, 'index.html');
+      const html = read(root, cfg.entryHtml);
       if (!html) return { ok: false, detail: ['index.html がありません'] };
       const clean = html.replace(/<!--[\s\S]*?-->/g, '');
       const headEnd = clean.indexOf('</head>');
@@ -960,7 +965,7 @@ export const CHECKS = [
     title: '1ファイルが 5,000行 / 400KB をこえていない',
     run: (root, cfg) => {
       const bad = [];
-      for (const rel of [...jsFiles(root, cfg), ...cssFiles(root, cfg), 'index.html']) {
+      for (const rel of [...jsFiles(root, cfg), ...cssFiles(root, cfg), cfg.entryHtml]) {
         const s = read(root, rel);
         if (!s) continue;
         const lines = s.split('\n').length;
