@@ -181,7 +181,14 @@ const cssSources = (root, cfg, withOffline = true) => [
     .flatMap((rel) => {
       const s = read(root, rel);
       if (!s) return [];
-      const blocks = [...s.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/gi)].map((m) => m[1]);
+      // ⚠️ 先に HTML コメントを落とす。
+      //    説明文の中に <style> と書いてあると（CSP の注意書きなどでよくある）、
+      //    そこから本物の </style> までが丸ごと「CSS」として読まれる。
+      //    Quarto の index.html では、そうやって取りこまれた 3,164 文字の
+      //    説明文の中に prefers-reduced-motion という語があり、
+      //    本物の CSS からその指定を消しても D_REDUCED_MOTION が通っていた
+      //    （2026-08-23）。検査が「書いてある言葉」で満たされてはいけない。
+      const blocks = [...s.replace(/<!--[\s\S]*?-->/g, '').matchAll(/<style[^>]*>([\s\S]*?)<\/style>/gi)].map((m) => m[1]);
       return blocks.length ? [{ rel: `${rel} の <style>`, css: blocks.join('\n') }] : [];
     }),
 ];
@@ -836,12 +843,19 @@ export const CHECKS = [
       }
       // ⚠️ 目印はコメントなので、コメント除去前の原文で見る。
       const name = cfg.swVersionConst ? cfg.swVersionConst.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') : '(?:APP_VERSION|VERSION)';
-      const m = src.match(new RegExp(`const ${name} = '([^']*)'; /\\* __APP_VERSION__ \\*/`));
-      if (!m) {
+      // 目印の付け方は2通りある。どちらも tools/build-sw.mjs（正本）が埋める。
+      //   ① const APP_VERSION = 'v1a2b3c4'; /* __APP_VERSION__ */
+      //   ② const APP_VERSION = '__APP_VERSION__';   ← 値そのものが目印
+      // ② は vite-plugin-pwa 型（Quarto）の書き方で、build-sw-vite.mjs が
+      //    はじめから対応している。ゲートだけが①しか知らず、正しく自動生成
+      //    しているリポジトリを「手書きだ」と落としていた（2026-08-23）。
+      const stamped = src.match(new RegExp(`const ${name} = '([^']*)'; /\\* __APP_VERSION__ \\*/`));
+      const placeholder = new RegExp(`const ${name} = '__APP_VERSION__';`).test(src);
+      if (!stamped && !placeholder) {
         return { ok: false, detail: [`${rel} の版の行が自動生成の形（__APP_VERSION__ の目印つき）になっていません`] };
       }
-      if (cfg.sw === 'static' && (m[1] === 'v0' || m[1] === 'dev')) {
-        return { ok: false, detail: [`${rel} の版が仮の値（${m[1]}）のままです。node tools/build-sw.mjs で埋めてください`] };
+      if (stamped && cfg.sw === 'static' && (stamped[1] === 'v0' || stamped[1] === 'dev')) {
+        return { ok: false, detail: [`${rel} の版が仮の値（${stamped[1]}）のままです。node tools/build-sw.mjs で埋めてください`] };
       }
       return { ok: true, detail: [] };
     },
@@ -872,6 +886,23 @@ export const CHECKS = [
       const src = read(root, rel);
       if (!src) return { ok: false, detail: [`${rel} がありません`] };
       const code = stripComments(src);
+      // ⚠️ 先読みを vite-plugin-pwa の injectManifest に任せている型
+      //    （self.__WB_MANIFEST）は、原文からは一覧の中身が分からない。
+      //    ここで配列を見ても真偽が決まらないので、宣言だけを見る。
+      //    ただし黙って素通りはさせない。宣言が無ければ落とす。
+      //    実際に offline.html が入ったかは、各リポジトリが dist/sw.js を見て
+      //    確かめること（Quarto の E10_OFFLINE_PRECACHED がその形）。
+      if (/__WB_MANIFEST/.test(code)) {
+        const cfgSrc = read(root, 'sw-build.config.json');
+        let declared = false;
+        // 読めない JSON は「宣言なし」として扱う（catch では代入しない。
+        // 配布先の lint が no-useless-assignment で落ちる）
+        try { declared = JSON.parse(cfgSrc || '{}').precacheManagedByPlugin === true; } catch { /* 宣言なしのまま */ }
+        if (!declared) {
+          return { ok: false, detail: ['先読みを self.__WB_MANIFEST に任せていますが、sw-build.config.json に precacheManagedByPlugin: true がありません'] };
+        }
+        return { ok: true, detail: [], skip: '先読み一覧はビルドで注入されます（dist を見る検査は各リポジトリ側）' };
+      }
       // ⚠️ ファイル全体で offline.html をさがしてはいけない。
       //    fetch の逃げ道に caches.match('./offline.html') と書いてあれば
       //    見つかってしまい、**先読みしていなくても通る**。
