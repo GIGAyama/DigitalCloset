@@ -92,6 +92,15 @@ export function runBuildChecks(cfg) {
   add('P_TOTAL_ASSETS', total <= cfg.limits.maxTotalAssetBytes,
     `総アセットが ${(cfg.limits.maxTotalAssetBytes / 1024).toFixed(0)}KB 以下であること（実測 ${(total / 1024).toFixed(1)}KB）`);
 
+  // 直下に置いた HTML は、vite.config.js の rollupOptions.input に並べたものしか
+  // dist/ に出ない。書き落とすと、ファイルはあるのに配信物へ入らず本番で 404 になる。
+  // privacy.html と terms.html はアプリ本体からリンクしていないので、画面では気づけない。
+  // 実際に 2026-08 の配信で両方が抜け落ちていた。ここで出口の側から数える。
+  const rootPages = readdirSync('.').filter((n) => extname(n) === '.html');
+  const missing = rootPages.filter((n) => !existsSync(join('dist', n)));
+  add('E12_HTML_SHIPPED', missing.length === 0,
+    `直下の HTML がすべて dist/ に出ていること（${rootPages.length} 件${missing.length ? `／欠け: ${missing.join(', ')}` : ''}）`);
+
   const sw = readFileSync('dist/sw.js', 'utf8');
   add('E11_VERSION_FILLED', !/APP_VERSION = 'dev'/.test(sw),
     'dist/sw.js の APP_VERSION がビルド時に埋まっていること');
