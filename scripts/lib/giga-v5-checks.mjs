@@ -197,6 +197,32 @@ const cssSources = (root, cfg, withOffline = true) => [
  * 「こわしたのに 通りました」と報告し続けていた。
  */
 const appCssSources = (root, cfg) => cssSources(root, cfg, false);
+/**
+ * addEventListener(..., () => { … }) のハンドラ本体を取り出す。
+ *
+ * 以前は目印から 400 文字を切り出して見ていた。すると、すぐ下にある別の
+ * 関数の見はり（`if (!worker) return;` など）まで窓に入り、
+ * controllerchange 側の見はりを丸ごと消しても「見はりがある」と読めてしまう。
+ * 実際 Reversi の移行（2026-08-23）で、見はりの行を削っても落ちなかった。
+ * 中かっこの対応でハンドラの終わりまでを取れば、隣の関数を巻きこまない。
+ *
+ * ハンドラを名前で渡している形（addEventListener('x', onChange)）では近くに
+ * `{` が無い。そのときだけ、これまでどおり 400 文字の窓で見る。
+ */
+export function handlerBody(js, from) {
+  const open = js.indexOf('{', from);
+  if (open < 0 || open - from > 120) return js.slice(from, from + 400);
+  let depth = 0;
+  for (let i = open; i < js.length; i += 1) {
+    if (js[i] === '{') depth += 1;
+    else if (js[i] === '}') {
+      depth -= 1;
+      if (depth === 0) return js.slice(from, i + 1);
+    }
+  }
+  return js.slice(from);
+}
+
 const swSourceOf = (cfg) => cfg.swSource || (cfg.sw === 'vite' ? 'public/sw.js' : 'sw.js');
 
 /**
@@ -744,7 +770,7 @@ export const CHECKS = [
         // 押したかどうかの見はりが無いと、初回訪問がかならず1回リロードされる。
         // 見はりの形は if (!asked) return; のほか、minify 後は
         // !H||U||(U=!0,location.reload()) のような短絡式にもなる。
-        const seg = js.slice(js.indexOf('controllerchange'), js.indexOf('controllerchange') + 400);
+        const seg = handlerBody(js, js.indexOf('controllerchange'));
         const reloadAt = seg.search(/location\s*\.\s*reload/);
         const before = reloadAt > 0 ? seg.slice(0, reloadAt) : '';
         const guarded = /if\s*\(\s*![\w$]+/.test(seg)
