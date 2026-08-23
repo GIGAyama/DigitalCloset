@@ -609,9 +609,15 @@ export const CHECKS = [
   {
     id: 'E_CNAME',
     title: 'CNAME に BOM がなく、ドメイン名 1行だけ',
-    run: (root) => {
-      const p = path.join(root, 'CNAME');
-      if (!fs.existsSync(p)) return { ok: true, detail: [], skip: '独自ドメインをつかっていません' };
+    run: (root, cfg) => {
+      // ⚠️ 置き場はリポジトリによって違う。配信の起点に置くのが本当で、
+      //    直下に決め打ちすると、docs/ から配るリポジトリでは
+      //    「独自ドメインをつかっていません」と言って**黙って通る**。
+      //    SchoolPlan_Editor は docs/CNAME を持っているのに、
+      //    BOM を入れても1行でなくしても素通りしていた（2026-08-23）。
+      const candidates = [sitePath(root, cfg, 'CNAME'), path.join(root, 'CNAME')];
+      const p = candidates.find((c) => fs.existsSync(c));
+      if (!p) return { ok: true, detail: [], skip: '独自ドメインをつかっていません' };
       const raw = fs.readFileSync(p, 'utf8');
       // ⚠️ BOM を必ず見ること。メモ帳や PowerShell の `>` で書くと先頭に U+FEFF が入る。
       //    目では見えないのに GitHub Pages はドメイン名の一部として読むため、
