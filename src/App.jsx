@@ -2046,7 +2046,23 @@ function SettingsView({ apiKey, setApiKey, geminiModel, setGeminiModel, customCa
           }} />
         </div>
       </section>
-      
+
+      {/* このアプリにはフッターが無いので、設定のいちばん下に置く。
+          ここは元から「データ管理」など、使い方を確かめたい人が来る場所。 */}
+      <section className="bg-white p-5 rounded-3xl border border-gray-100 shadow-sm">
+        <h3 className="font-bold mb-2 text-gray-800">このアプリについて</h3>
+        <p className="text-[11px] text-gray-500 mb-4 leading-relaxed">使い方と、授業での使いどころを giga-school.com に書いています。</p>
+        <a
+          href="https://giga-school.com/apps/digitalcloset/"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="w-full min-h-[44px] py-4 bg-gray-50 hover:bg-gray-100 active:scale-[0.98] text-gray-700 rounded-2xl text-sm font-bold flex items-center justify-center gap-2 transition-all no-underline"
+        >
+          使い方を読む
+          <ChevronRight size={18} className="text-gray-400" />
+        </a>
+      </section>
+
       <ConfirmModal isOpen={confirmImport} title="データのインポート" message={`選択された ${importFiles?.length} 個のファイルからデータを復元しますか？\n（既存のデータは保持されます）`} confirmText="復元する" onConfirm={executeImport} onCancel={() => { setConfirmImport(false); setImportFiles(null); if(fileInputRef.current) fileInputRef.current.value = ''; }} />
     </div>
   );
