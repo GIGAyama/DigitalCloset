@@ -105,6 +105,9 @@ ok('インラインの <script> が止まる', inlineRan === false,
 // 許していない外部から script を読ませる
 const externalBlocked = await page.evaluate(() => new Promise((resolve) => {
   const s = document.createElement('script');
+  // giga-lint-ignore-next-line — ここは「外部 CDN を読ませようとして、
+  // CSP に止められること」を確かめる計測そのもの。止まらなければこの検査が落ちる。
+  // この道具は開発時にしか動かず、配信物には入らない。
   s.src = 'https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js';
   s.onload = () => resolve(false);
   s.onerror = () => resolve(true);
