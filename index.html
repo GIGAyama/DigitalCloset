@@ -83,6 +83,22 @@
 </head>
 <body>
   <div id="root"></div>
+
+  <!-- 利用規約・プライバシーへの行き先。中身は正本の部品
+       standards/web/giga-app-links.js（配布物 public/giga-app-links.js）が出す。
+       文言も並びも行き先も、あちらで決まっている。手で書かないこと。
+
+       ⚠️ このアプリにはフッターが無く、画面はすべて React が描く。
+          置き場所の <div data-giga-links> を App.jsx の中に置いても、
+          その部分が描かれるまで存在しない。部品は既定（画面のいちばん下）に
+          出したうえで、置き場所が現れたら移る作りになっているので、
+          ここでは置き場所を作らず既定にまかせる。
+
+       ⚠️ data-links で「つかいかた」を外してある。このアプリにはまだ
+          docs/manual/ が無く、既定のまま出すと行き止まりのリンクになる。
+          マニュアルを書いたら、この属性ごと消すこと。 -->
+  <script src="/giga-app-links.js" data-links="terms,privacy" defer></script>
+
   <script type="module" src="/src/main.jsx"></script>
 </body>
 </html>

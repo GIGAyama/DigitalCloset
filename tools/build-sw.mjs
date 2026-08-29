@@ -38,6 +38,9 @@ const wanted = all.filter((p) => {
   if (rel === 'sw.js') return false;                       // 自分自身は入れない
   if (rel === 'index.html' || rel === 'offline.html') return true;
   if (rel === 'manifest.webmanifest' || rel === 'install-hook.js') return true;
+  // 利用規約・プライバシーの行き先を出す部品。入れておかないと、圏外で開いた
+  // ときだけリンクが 1 本も出ない（行き先は開けなくても、どこにあるかは見える）。
+  if (rel === 'giga-app-links.js') return true;
   if (rel.startsWith('assets/')) return true;              // ハッシュ付きの JS / CSS
   if (rel === 'icons/icon-192.png' || rel === 'icons/icon-512.png') return true;
   return false;
